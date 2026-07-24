@@ -617,6 +617,85 @@ quasi("quasi_run_f1", QUA_LEGS_STAND, 0)
 quasi("quasi_run_f2", QUA_LEGS_B, 1)
 quasi("quasi_run_f3", QUA_LEGS_STAND, 0)
 
+# ---------------------------------------------------------- assassin -------
+# hooded killer: slate hood and mask, only the eyes show, red sash.
+ASN_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "H": (56, 62, 80, 255),    # hood
+    "h": (78, 86, 108, 255),   # hood light
+    "M": (40, 44, 58, 255),    # mask / dark cloth
+    "E": (214, 230, 255, 255), # eye slits
+    "R": (146, 42, 40, 255),   # sash
+    "b": (34, 38, 50, 255),    # boots
+}
+
+ASN_TOP = """
+.....KKKK.....
+....KHHHHK....
+...KHHHHHHK...
+...KHhhhhHK...
+...KHEhhEHK...
+...KHMMMMHK...
+....KMMMMK....
+....KHHHHK....
+...KHHHHHHK...
+..KHHHHHHHHK..
+..KhHHHHHHhK..
+..KhHRRRRHhK..
+..KKHHHHHHKK..
+...KMHHHHMK...
+...KMMMMMMK...
+""".strip("\n")
+
+ASN_LEGS_STAND = """
+...KMMKKMMK...
+....KbK.KbK...
+....KK...KK...
+""".strip("\n")
+
+ASN_LEGS_A = """
+...KMMK.KMMK..
+...KbK...KbK..
+...KK.....KK..
+""".strip("\n")
+
+ASN_LEGS_B = """
+..KMMK.KMMK...
+..KbK...KbK...
+...KK...KK....
+""".strip("\n")
+
+
+def assassin(name, legs, bob):
+    save_grid(name, ("." * 14 + "\n") * bob + ASN_TOP + "\n" + legs, ASN_PAL)
+
+
+assassin("assassin_idle_f0", ASN_LEGS_STAND, 1)
+assassin("assassin_idle_f1", ASN_LEGS_STAND, 0)
+assassin("assassin_idle_f2", ASN_LEGS_STAND, 0)
+assassin("assassin_idle_f3", ASN_LEGS_STAND, 1)
+assassin("assassin_run_f0", ASN_LEGS_A, 1)
+assassin("assassin_run_f1", ASN_LEGS_STAND, 0)
+assassin("assassin_run_f2", ASN_LEGS_B, 1)
+assassin("assassin_run_f3", ASN_LEGS_STAND, 0)
+
+SHUR_PAL = {
+    "K": (24, 18, 26, 255),
+    "A": (196, 204, 218, 255),
+    "a": (126, 134, 152, 255),
+}
+save_grid("weapon_shuriken", """
+....K....
+...KAK...
+.K.KaK.K.
+KAKaKaKAK
+.KaK.KaK.
+KAKaKaKAK
+.K.KaK.K.
+...KAK...
+....K....
+""", SHUR_PAL)
+
 # ---------------------------------------------------------- molotov --------
 MOL_PAL = {
     "K": (24, 18, 26, 255),    # outline

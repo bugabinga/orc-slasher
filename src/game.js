@@ -36,6 +36,8 @@ const ANIM = {
   quasi_run: ["quasi_run_f0", "quasi_run_f1", "quasi_run_f2", "quasi_run_f3"],
   reaper_idle: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
   reaper_run: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
+  assassin_idle: ["assassin_idle_f0", "assassin_idle_f1", "assassin_idle_f2", "assassin_idle_f3"],
+  assassin_run: ["assassin_run_f0", "assassin_run_f1", "assassin_run_f2", "assassin_run_f3"],
   goblin_idle: ["goblin_idle_f0", "goblin_idle_f1", "goblin_idle_f2", "goblin_idle_f3"],
   goblin_run: ["goblin_run_f0", "goblin_run_f1", "goblin_run_f2", "goblin_run_f3"],
   orc_warrior_idle: ["orc_warrior_idle_f0", "orc_warrior_idle_f1", "orc_warrior_idle_f2", "orc_warrior_idle_f3"],
@@ -179,7 +181,7 @@ canvas.addEventListener("pointerdown", e => {
     handleClick(p.x, p.y);
     return;
   }
-  if (G.state === "play" && usingTouch &&
+  if (G.state === "play" && !G.paused && usingTouch &&
       Math.hypot(p.x - DASH_BTN.x, p.y - DASH_BTN.y) < DASH_BTN.r + 6) {
     // dash toward joystick direction, or facing if standing still
     let dx = player.facing, dy = 0;
@@ -291,7 +293,7 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, arrows, molotovs, firePatches, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
@@ -304,6 +306,8 @@ const WEAPONS = {
   scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 15, atkSpd: 0.75, range: 44, arc: 2.4, unlock: "scythe" },
   molotov: { name: "Molotov", desc: "lobbed firebomb, burns the ground", sprite: "weapon_molotov", dmg: 12, atkSpd: 0.6, range: 130, arc: 0, thrown: true },
   shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 4, atkSpd: 2.5, range: 24, arc: 1.2 },
+  katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 11, atkSpd: 1.3, range: 40, arc: 0.9 },
+  shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 4, atkSpd: 2.6, range: 120, arc: 0, star: true },
 };
 
 // classes -------------------------------------------------------------------
@@ -317,13 +321,30 @@ const CLASSES = {
     mods: s => { s.regen += 1.2; s.xpGain *= 1.20; s.dmg *= 0.85; s.maxHp = 55; } },
   quasi: { name: "Quasimodo", anim: "quasi", desc: "hunched & hardy: 75 HP, a bit slow", weapons: ["molotov", "shiv"],
     mods: s => { s.maxHp = 75; s.moveSpd *= 0.95; } },
-  reaper: { name: "Reaper", anim: "reaper", desc: "+20% dmg, 3% lifesteal, frail", unlock: "reaper",
+  assassin: { name: "Assassin", anim: "assassin", desc: "+15% crit, +10% speed, 50 HP", unlock: "assassin", price: 400,
+    weapons: ["katana", "shuriken"],
+    mods: s => { s.crit += 0.15; s.moveSpd *= 1.10; s.maxHp = 50; } },
+  reaper: { name: "Reaper", anim: "reaper", desc: "+20% dmg, 3% lifesteal, frail", unlock: "reaper", price: 600,
     weapons: ["scythe", "knives"],
     mods: s => { s.dmg *= 1.20; s.lifesteal += 0.03; s.maxHp = 45; s.moveSpd *= 1.05; } },
 };
+CLASSES.barbar.price = 300;
+CLASSES.nun.price = 300;
+
+// persistent gold bank — coins left at the end of a run are deposited here
+// and spent on unlocking classes
+const META = { gold: 0 };
+try { Object.assign(META, JSON.parse(localStorage.getItem("orcslasher_meta") || "{}")); } catch (e) { /* no storage */ }
+function saveMeta() { try { localStorage.setItem("orcslasher_meta", JSON.stringify(META)); } catch (e) { /* no storage */ } }
+function bankCoins() {
+  if (G.bankedRun || !G.coins) return;
+  META.gold += Math.round(G.coins);
+  G.bankedRun = true;
+  saveMeta();
+}
 
 // unlocks persist across runs (best-effort; storage may be unavailable)
-const UN = { barbar: false, nun: false, reaper: false, scythe: false };
+const UN = { barbar: false, nun: false, reaper: false, scythe: false, assassin: false };
 try { Object.assign(UN, JSON.parse(localStorage.getItem("orcslasher_unlocks") || "{}")); } catch (e) { /* no storage */ }
 function saveUnlocks() { try { localStorage.setItem("orcslasher_unlocks", JSON.stringify(UN)); } catch (e) { /* no storage */ } }
 function isUnlocked(key) { return DEV.on || !key || UN[key]; }
@@ -411,9 +432,9 @@ function newRun(weaponId) {
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; molotovs = []; firePatches = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fx = []; texts = [];
   spawnQueue = []; spawnTimer = 0;
-  G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false;
+  G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
   startWave(1);
   G.state = "play";
 }
@@ -541,6 +562,7 @@ function drawThreeCards() {
 
 function enterCampfire() {
   G.state = "campfire";
+  G.coins += 25; // wave bounty
   player.hp = Math.min(player.stats.maxHp, player.hp + Math.round((player.stats.maxHp - player.hp) * 0.4));
   campfire = {
     t: 0,
@@ -716,6 +738,18 @@ function explodeMolotov(m) {
   }
 }
 
+function playerStarAttack() {
+  const st = player.stats;
+  const target = nearestEnemy(player, st.range);
+  if (!target) return;
+  player.atkCd = 1 / st.atkSpd;
+  const ang = Math.atan2(target.y - player.y, target.x - player.x);
+  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
+  player.atkAng = ang;
+  stars.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 260, vy: Math.sin(ang) * 260, spin: 0, life: 0.6 });
+  SFX.slash();
+}
+
 function playerBowAttack() {
   const st = player.stats;
   const target = nearestEnemy(player, st.range);
@@ -771,6 +805,8 @@ function updatePlay(dt) {
     }
   } else if (WEAPONS[G.weapon].thrown) {
     if (player.atkCd <= 0) playerMolotovAttack();
+  } else if (WEAPONS[G.weapon].star) {
+    if (player.atkCd <= 0) playerStarAttack();
   } else if (player.atkCd <= 0) playerMeleeAttack();
 
   // -- molotovs & burning ground
@@ -871,6 +907,19 @@ function updatePlay(dt) {
   }
 
   // -- projectiles
+  for (const s2 of [...stars]) {
+    s2.x += s2.vx * dt; s2.y += s2.vy * dt; s2.spin += dt * 22; s2.life -= dt;
+    for (const e of enemies) {
+      if (e.warmup > 0) continue;
+      if (dist(s2, { x: e.x, y: e.y - 4 }) < e.r + 4) {
+        const crit = Math.random() < st.crit;
+        damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+        s2.life = 0;
+        break;
+      }
+    }
+    if (s2.life <= 0) stars.splice(stars.indexOf(s2), 1);
+  }
   for (const a of [...arrows]) {
     a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt;
     for (const e of enemies) {
@@ -971,6 +1020,7 @@ function hurtPlayer(dmg) {
   texts.push({ x: player.x, y: player.y - 26, s: "-" + Math.round(taken), life: 0.8, col: "#ff6b6b" });
   if (player.hp <= 0) {
     G.state = "gameover";
+    bankCoins();
     SFX.bossRoar();
   }
 }
@@ -1042,6 +1092,12 @@ function renderWorld() {
   for (const a of arrows) {
     ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.ang + Math.PI / 2);
     const im = IMG.weapon_arrow;
+    ctx.drawImage(im, -im.width / 2, -im.height / 2);
+    ctx.restore();
+  }
+  for (const s2 of stars) {
+    ctx.save(); ctx.translate(Math.round(s2.x), Math.round(s2.y)); ctx.rotate(s2.spin);
+    const im = IMG.weapon_shuriken;
     ctx.drawImage(im, -im.width / 2, -im.height / 2);
     ctx.restore();
   }
@@ -1133,10 +1189,10 @@ function drawPlayer() {
     ctx.drawImage(im, -im.width / 2, -im.height + 3);
     ctx.restore();
   } else {
-    const swing = (wdef.ranged || wdef.thrown || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
+    const swing = (wdef.ranged || wdef.thrown || wdef.star || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
     ctx.save();
     ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
-    ctx.rotate(player.facing * ((wdef.ranged || wdef.thrown) ? 0.15 : 0.5 + swing));
+    ctx.rotate(player.facing * ((wdef.ranged || wdef.thrown || wdef.star) ? 0.15 : 0.5 + swing));
     ctx.scale(player.facing, 1);
     ctx.drawImage(im, -2, -im.height + 4);
     ctx.restore();
@@ -1242,6 +1298,15 @@ function renderHUD() {
       }
     }
   }
+  // pause button
+  pauseBtnRect = { x: VW - 28, y: 30, w: 20, h: 18 };
+  ctx.fillStyle = "rgba(36,28,46,0.75)"; ctx.fillRect(pauseBtnRect.x, pauseBtnRect.y, pauseBtnRect.w, pauseBtnRect.h);
+  ctx.strokeStyle = "#57506b"; ctx.lineWidth = 1;
+  ctx.strokeRect(pauseBtnRect.x + 0.5, pauseBtnRect.y + 0.5, pauseBtnRect.w - 1, pauseBtnRect.h - 1);
+  ctx.fillStyle = "#cfc6de";
+  ctx.fillRect(pauseBtnRect.x + 6, pauseBtnRect.y + 5, 3, 8);
+  ctx.fillRect(pauseBtnRect.x + 11, pauseBtnRect.y + 5, 3, 8);
+
   // touch dash button
   if (usingTouch) {
     const ready = player.dashCd <= 0;
@@ -1261,6 +1326,23 @@ function renderHUD() {
     ctx.fillStyle = ready ? "#fff" : "#8f84a8";
     ctx.fillText("»", DASH_BTN.x, DASH_BTN.y + 3);
   }
+}
+
+let pauseBtnRect = null, fsPauseRect = null;
+function renderPauseOverlay(t) {
+  ctx.fillStyle = "rgba(7,5,16,0.7)"; ctx.fillRect(0, 0, VW, VH);
+  ctx.textAlign = "center";
+  ctx.font = "bold 20px monospace"; ctx.fillStyle = "#ffd166";
+  ctx.fillText("PAUSED", VW / 2, 110);
+  ctx.font = "8px monospace"; ctx.fillStyle = "#cfc6de";
+  ctx.fillText("tap / press P to resume", VW / 2, 130);
+  const bw = 150, bh = 24;
+  fsPauseRect = { x: VW / 2 - bw / 2, y: 150, w: bw, h: bh };
+  ctx.fillStyle = "#241c2e"; ctx.fillRect(fsPauseRect.x, fsPauseRect.y, bw, bh);
+  ctx.strokeStyle = "#8a6a30"; ctx.lineWidth = 1;
+  ctx.strokeRect(fsPauseRect.x + 0.5, fsPauseRect.y + 0.5, bw - 1, bh - 1);
+  ctx.font = "bold 8px monospace"; ctx.fillStyle = "#e8dfc8";
+  ctx.fillText("FULLSCREEN  [F]", VW / 2, fsPauseRect.y + 15);
 }
 
 // campfire scene -----------------------------------------------------------
@@ -1491,8 +1573,19 @@ function slashOut(r) {
 }
 function drawKeyButton() {
   sndBtnRects = [];
+  // fullscreen toggle
+  let r = menuButton(VW - 112, true);
+  ctx.strokeStyle = "#e8dfc8"; ctx.lineWidth = 1;
+  for (const [cx2, cy2, dx, dy] of [[5, 5, 1, 1], [17, 5, -1, 1], [5, 15, 1, -1], [17, 15, -1, -1]]) {
+    ctx.beginPath();
+    ctx.moveTo(r.x + cx2 + dx * 4, r.y + cy2);
+    ctx.lineTo(r.x + cx2, r.y + cy2);
+    ctx.lineTo(r.x + cx2, r.y + cy2 + dy * 4);
+    ctx.stroke();
+  }
+  sndBtnRects.push({ ...r, id: "fs" });
   // music toggle
-  let r = menuButton(VW - 84, SND.music);
+  r = menuButton(VW - 84, SND.music);
   const mc = SND.music ? "#e8dfc8" : "#57506b";
   ctx.fillStyle = mc;
   ctx.fillRect(r.x + 5, r.y + 13, 3, 3);  // note heads
@@ -1561,8 +1654,31 @@ function renderPassModal(dt) {
   }
 }
 
-// class select ---------------------------------------------------------------
-let clsRects = [];
+// class select + class shop ---------------------------------------------------
+let clsRects = [], clsToast = null;
+
+function tryBuyClass(id) {
+  const c = CLASSES[id];
+  if (!c.price) return;
+  if (META.gold < c.price) {
+    clsToast = { s: `${c.name} costs ${c.price} gold — you have ${META.gold}`, t: 2.2 };
+    SFX.hurt();
+    return;
+  }
+  META.gold -= c.price;
+  UN[c.unlock] = true;
+  saveMeta(); saveUnlocks();
+  clsToast = { s: `${c.name.toUpperCase()} UNLOCKED!`, t: 2.5 };
+  SFX.level();
+}
+
+function unlockHint(id, c) {
+  const buy = `buy ${c.price}g`;
+  if (id === "reaper") return buy + " · or reach wave 10";
+  if (id === "barbar" || id === "nun") return buy + " · or 0.1% boss relic";
+  return buy;
+}
+
 function renderClassSelect(t) {
   ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
   const g = ctx.createRadialGradient(VW / 2, 60, 8, VW / 2, 60, 140);
@@ -1572,34 +1688,59 @@ function renderClassSelect(t) {
   ctx.font = "bold 14px monospace"; ctx.fillStyle = "#ffd166";
   ctx.fillText("CHOOSE YOUR HERO", VW / 2, 36);
 
+  // gold bank
+  const cim = IMG.coin_f0;
+  if (cim && cim.complete) ctx.drawImage(cim, 10, 8);
+  ctx.textAlign = "left"; ctx.font = "bold 10px monospace"; ctx.fillStyle = "#ffd166";
+  ctx.fillText(`${META.gold}`, 24, 18);
+  ctx.font = "6px monospace"; ctx.fillStyle = "#6f6485";
+  ctx.fillText("your gold", 10, 27);
+  ctx.textAlign = "center";
+
   clsRects = [];
   const ids = Object.keys(CLASSES);
-  const cw = 88, chh = 140, gap = 8;
+  const cw = 76, chh = 142, gap = 3;
   const total = ids.length * cw + (ids.length - 1) * gap;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], c = CLASSES[id];
     const unlocked = isUnlocked(c.unlock);
-    const x = VW / 2 - total / 2 + i * (cw + gap), y = 56;
+    const x = VW / 2 - total / 2 + i * (cw + gap), y = 52;
     clsRects.push({ x, y, w: cw, h: chh, id, unlocked });
     ctx.drawImage(IMG.card, x, y, cw, chh);
-    drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + cw / 2, y + 62, false, 1.4);
-    ctx.font = "bold 9px monospace"; ctx.fillStyle = "#3a2c18";
-    ctx.fillText(c.name, x + cw / 2, y + 84);
-    ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
-    wrapText(c.desc, x + cw / 2, y + 98, cw - 14, 9);
-    ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
-    ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 12);
+    drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + cw / 2, y + 58, false, 1.3);
+    ctx.font = "bold 8px monospace"; ctx.fillStyle = "#3a2c18";
+    ctx.fillText(c.name, x + cw / 2, y + 78);
+    ctx.font = "6px monospace"; ctx.fillStyle = "#584426";
+    wrapText(c.desc, x + cw / 2, y + 90, cw - 10, 8);
+    ctx.font = "bold 7px monospace"; ctx.fillStyle = "#a5834a";
+    ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 10);
     if (!unlocked) {
       ctx.fillStyle = "rgba(11,9,16,0.88)"; ctx.fillRect(x + 2, y + 2, cw - 4, chh - 4);
-      drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + cw / 2, y + 62, false, 1.4, 0.25);
-      ctx.font = "bold 9px monospace"; ctx.fillStyle = "#8f84a8"; ctx.textAlign = "center";
-      ctx.fillText("LOCKED", x + cw / 2, y + 88);
+      drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + cw / 2, y + 58, false, 1.3, 0.25);
+      ctx.font = "bold 8px monospace"; ctx.fillStyle = "#8f84a8"; ctx.textAlign = "center";
+      ctx.fillText("LOCKED", x + cw / 2, y + 80);
       ctx.font = "6px monospace"; ctx.fillStyle = "#6f6485";
-      wrapText(id === "reaper" ? "reach wave 10" : "0.1% relic drop from bosses", x + cw / 2, y + 102, cw - 12, 8);
+      wrapText(unlockHint(id, c), x + cw / 2, y + 92, cw - 8, 8);
+      // buy ribbon
+      const afford = META.gold >= c.price;
+      ctx.fillStyle = afford ? "#2e2438" : "#181322";
+      ctx.fillRect(x + 8, y + chh - 26, cw - 16, 16);
+      ctx.strokeStyle = afford ? "#ffd166" : "#3a3346"; ctx.lineWidth = 1;
+      ctx.strokeRect(x + 8.5, y + chh - 25.5, cw - 17, 15);
+      ctx.font = "bold 7px monospace"; ctx.fillStyle = afford ? "#ffd166" : "#57506b";
+      ctx.fillText(`BUY ${c.price}g`, x + cw / 2, y + chh - 15);
+    }
+  }
+  if (clsToast) {
+    clsToast.t -= 1 / 60;
+    if (clsToast.t <= 0) clsToast = null;
+    else {
+      ctx.font = "bold 8px monospace"; ctx.fillStyle = "#ffd166";
+      ctx.fillText(clsToast.s, VW / 2, VH - 26);
     }
   }
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText(`click or press 1-${ids.length}`, VW / 2, VH - 12);
+  ctx.fillText(`click or press 1-${ids.length} · locked heroes can be bought with banked gold`, VW / 2, VH - 12);
   drawKeyButton();
 }
 
@@ -1768,15 +1909,19 @@ function renderEnd(victory, t) {
 
 // ------------------------------------------------------------- input glue --
 function handleKey(code) {
+  if (code === "KeyF" && ["title", "select"].includes(G.state)) { toggleFullscreen(); return; }
   if (G.state === "title" && code === "KeyC") { audio(); creditsT0 = performance.now() / 1000; G.state = "credits"; }
   else if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "cls"; }
   else if (G.state === "credits") { G.state = "title"; }
   else if (G.state === "cls") {
     const ids = Object.keys(CLASSES);
+    if (code === "KeyF") { toggleFullscreen(); return; }
     const m = /^Digit([1-9])$/.exec(code);
     if (m) {
       const id = ids[+m[1] - 1];
-      if (id && isUnlocked(CLASSES[id].unlock)) { G.cls = id; G.state = "select"; }
+      if (!id) return;
+      if (isUnlocked(CLASSES[id].unlock)) { G.cls = id; G.state = "select"; }
+      else tryBuyClass(id);
     }
   } else if (G.state === "select") {
     const ids = CLASSES[G.cls].weapons;
@@ -1796,8 +1941,18 @@ function handleKey(code) {
   } else if (G.state === "gameover" && code === "Enter") { cardCounts = {}; G.state = "cls"; }
   else if (G.state === "victory") {
     if (code === "KeyE") { G.endless = true; G.state = "play"; enterCampfire(); }
-    if (code === "Enter") { cardCounts = {}; G.state = "cls"; }
+    if (code === "Enter") { bankCoins(); cardCounts = {}; G.state = "cls"; }
+  } else if (G.state === "play") {
+    if (code === "KeyP" || code === "Escape") G.paused = !G.paused;
+    if (code === "KeyF" && G.paused) toggleFullscreen();
   }
+}
+
+function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+  } catch (e) { /* not supported (e.g. iPhone Safari) */ }
 }
 
 function handleClick(x, y) {
@@ -1812,6 +1967,7 @@ function handleClick(x, y) {
   if (["title", "cls", "select"].includes(G.state)) {
     for (const r of sndBtnRects) {
       if (x >= r.x - 3 && x <= r.x + r.w + 3 && y >= r.y - 3 && y <= r.y + r.h + 3) {
+        if (r.id === "fs") { toggleFullscreen(); return true; }
         SND[r.id] = !SND[r.id];
         saveSound();
         SFX.card();
@@ -1840,8 +1996,10 @@ function handleClick(x, y) {
   if (G.state === "title") { G.state = "cls"; return true; }
   if (G.state === "cls") {
     for (const r of clsRects) {
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h && r.unlocked) {
-        G.cls = r.id; G.state = "select"; return true;
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+        if (r.unlocked) { G.cls = r.id; G.state = "select"; }
+        else tryBuyClass(r.id);
+        return true;
       }
     }
     return true;
@@ -1854,6 +2012,20 @@ function handleClick(x, y) {
   }
   if (G.state === "gameover") { cardCounts = {}; G.state = "cls"; return true; }
   if (G.state === "victory") { G.endless = true; G.state = "play"; enterCampfire(); return true; }
+  if (G.state === "play") {
+    if (pauseBtnRect && x >= pauseBtnRect.x - 3 && x <= pauseBtnRect.x + pauseBtnRect.w + 3 &&
+        y >= pauseBtnRect.y - 3 && y <= pauseBtnRect.y + pauseBtnRect.h + 3) {
+      G.paused = !G.paused;
+      return true;
+    }
+    if (G.paused) {
+      if (fsPauseRect && x >= fsPauseRect.x && x <= fsPauseRect.x + fsPauseRect.w &&
+          y >= fsPauseRect.y && y <= fsPauseRect.y + fsPauseRect.h) toggleFullscreen();
+      else G.paused = false;
+      return true;
+    }
+    return false;
+  }
   if (G.state === "campfire") {
     for (const r of shopRects) {
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
@@ -1903,10 +2075,11 @@ function frame(now) {
   else if (G.state === "cls") renderClassSelect(now / 1000);
   else if (G.state === "select") renderSelect(now / 1000);
   else if (G.state === "play") {
-    updatePlay(dt);
+    if (!G.paused) updatePlay(dt);
     if (G.state === "play" || G.state === "gameover" || G.state === "victory") {
       renderWorld();
       renderHUD();
+      if (G.state === "play" && G.paused) renderPauseOverlay(now / 1000);
       if (G.state === "gameover" || G.state === "victory") renderEnd(G.state === "victory", now / 1000);
     } else if (G.state === "campfire") renderCampfire(dt);
   }

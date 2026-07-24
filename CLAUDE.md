@@ -45,8 +45,11 @@ src/game.js` before building.
 - **WEAPONS / CLASSES** — data tables; classes own `weapons: [...]` and a
   `mods(stats)` function. Weapon kinds: melee (arc), `ranged` (bow clip +
   reload), `thrown` (molotov + fire patches)
-- **UN unlocks** — localStorage `orcslasher_unlocks`; barbar/nun via 0.1%
-  boss relic roll in `killEnemy`, reaper+scythe on reaching wave 10
+- **UN unlocks / META gold** — localStorage `orcslasher_unlocks` +
+  `orcslasher_meta`; barbar/nun via 0.1% boss relic roll in `killEnemy`,
+  reaper+scythe on reaching wave 10, or buy any locked class with banked
+  gold (`tryBuyClass`); +25 coin wave bounty in `enterCampfire`, run coins
+  banked via `bankCoins()` on death / new-run-after-victory
 - **E_TYPES / waveComposition / BOSS_CYCLE** — enemy stats & spawn tables;
   every 5th wave adds `bossFor(w)` (butcher → warchief → shamanking);
   warchief kill at wave 10 = victory, then endless

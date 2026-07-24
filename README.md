@@ -20,6 +20,8 @@ offline, on desktop and phone.
 - **Dash:** Space / Shift (touch: the round button, bottom-right) — a burst
   of speed with invincibility frames, 2s cooldown
 - **Menus:** click things, or press the number keys
+- **Pause:** P / Esc, or the ⏸ button top-right in combat
+- **Fullscreen:** the ⛶ button in the menu corner (or press F)
 
 ## Heroes
 
@@ -27,13 +29,19 @@ offline, on desktop and phone.
 |---|---|---|
 | 🛡 Knight | balanced, dependable | always yours |
 | 🔔 Quasimodo | 75 HP, a bit slow, throws molotovs | always yours |
-| 🪓 Barbarian | +25% damage, +10% speed, takes +15% damage | 0.1% relic drop from bosses |
-| ✝ Nun | regenerates, +20% XP, hits softer | 0.1% relic drop from bosses |
-| 💀 Reaper | +20% damage, lifesteal, very frail | reach wave 10 |
+| 🪓 Barbarian | +25% damage, +10% speed, takes +15% damage | buy 300g · or 0.1% boss relic |
+| ✝ Nun | regenerates, +20% XP, hits softer | buy 300g · or 0.1% boss relic |
+| 🗡 Assassin | +15% crit, +10% speed, 50 HP, katana & shuriken | buy 400g |
+| 💀 Reaper | +20% damage, lifesteal, very frail | buy 600g · or reach wave 10 |
 
 Each hero brings their own arsenal — the Knight his sword, spear and bow;
 the Barbarian knives, spear and war axe; the Nun whip and bow; Quasimodo
-his molotov and a small knife; the Reaper the scythe.
+his molotov and a small knife; the Assassin katana and shuriken; the
+Reaper the scythe.
+
+**Gold is forever:** every cleared wave pays a 25-gold bounty, and whatever
+gold you're holding when a run ends is banked. Spend the bank on the hero
+select screen to unlock new classes.
 
 ## The cave
 
