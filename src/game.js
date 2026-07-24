@@ -350,7 +350,7 @@ const CLASSES = {
   reaper: { name: "Reaper", anim: "reaper", desc: "+10% dmg, 2% lifesteal, frail", unlock: "reaper", price: 600,
     weapons: ["scythe", "knives"],
     mods: s => { s.dmg *= 1.10; s.lifesteal += 0.02; s.maxHp = 45; s.moveSpd *= 1.05; } },
-  mage: { name: "Mage", anim: "mage", desc: "3 spells: click casts, auto-aim", unlock: "mage", price: 1000,
+  mage: { name: "Mage", anim: "mage", desc: "3 spells: click casts, auto-aim", unlock: "mage", price: 900,
     weapons: ["spells"],
     mods: s => { s.maxHp = 50; } },
   monk: { name: "Monk", anim: "monk", desc: "dev tester — masters every weapon", devOnly: true,
