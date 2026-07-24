@@ -21,9 +21,11 @@ for (const [name, uri] of Object.entries(window.ASSETS)) {
   assetsLeft++;
   const im = new Image();
   im.onload = () => { assetsLeft--; };
+  im.onerror = () => { assetsLeft--; }; // a broken sprite must not hang the loading gate
   im.src = uri;
   IMG[name] = im;
 }
+const imgOk = im => im && im.complete && im.naturalWidth > 0;
 
 const ANIM = {
   hero_idle: ["knight_m_idle_f0", "knight_m_idle_f1", "knight_m_idle_f2", "knight_m_idle_f3"],
@@ -289,14 +291,16 @@ function buildMap() {
   }
   kingPos = { x: (MAP_W - 3) * TILE + 8, y: (kty + 1) * TILE + 2 };
 
-  // draw tiles
+  // draw tiles (fallback fills survive a stale-cache sprite mismatch)
+  const tileDraw = (name, x, y, fb) => {
+    const im = IMG[name];
+    if (imgOk(im)) fc.drawImage(im, x, y);
+    else { fc.fillStyle = fb; fc.fillRect(x, y, TILE, TILE); }
+  };
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (rock[ty][tx]) {
-        fc.drawImage(IMG[`cave_wall_${(tx * 7 + ty * 13) % 2}`], tx * TILE, ty * TILE);
-      } else {
-        fc.drawImage(IMG[`cave_floor_${(tx * 5 + ty * 11 + irnd(0, 1)) % 4}`], tx * TILE, ty * TILE);
-      }
+      if (rock[ty][tx]) tileDraw(`cave_wall_${(tx * 7 + ty * 13) % 2}`, tx * TILE, ty * TILE, "#1b1620");
+      else tileDraw(`cave_floor_${(tx * 5 + ty * 11 + irnd(0, 1)) % 4}`, tx * TILE, ty * TILE, "#393130");
     }
   }
   // lit rim where rock meets floor below — sells the depth
@@ -330,16 +334,17 @@ function buildMap() {
   for (let i = 0; i < 5; i++) { // blocking stalagmites
     const t = freeTile();
     if (!t) continue;
-    fc.drawImage(IMG.stalagmite_big, t.tx * TILE + 2, t.ty * TILE + 3);
+    if (imgOk(IMG.stalagmite_big)) fc.drawImage(IMG.stalagmite_big, t.tx * TILE + 2, t.ty * TILE + 3);
     solids.push({ x: t.tx * TILE + 3, y: t.ty * TILE + 7, w: 10, h: 7 });
   }
   for (let i = 0; i < 6; i++) {
     const t = freeTile();
-    if (t) fc.drawImage(IMG.stalagmite_small, t.tx * TILE + 4, t.ty * TILE + 6);
+    if (t && imgOk(IMG.stalagmite_small)) fc.drawImage(IMG.stalagmite_small, t.tx * TILE + 4, t.ty * TILE + 6);
   }
   for (let i = 0; i < 5; i++) {
     const t = freeTile();
-    if (t) fc.drawImage(IMG[i % 2 ? "bone_pile" : "skull"], t.tx * TILE + 2, t.ty * TILE + 5);
+    const im = IMG[i % 2 ? "bone_pile" : "skull"];
+    if (t && imgOk(im)) fc.drawImage(im, t.tx * TILE + 2, t.ty * TILE + 5);
   }
   for (let i = 0; i < 7; i++) { // glowing mushrooms are drawn live (they flicker)
     const t = freeTile();
