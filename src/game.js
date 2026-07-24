@@ -352,7 +352,7 @@ function isUnlocked(key) { return DEV.on || !key || UN[key]; }
 // developer mode — toggled by typing a secret passphrase on any menu screen.
 // Only the hash of the phrase is stored here, so the phrase can't be read
 // from the source. While active, every class and weapon is available.
-const DEV = { on: false, buf: "", HASH: 855446522, LEN: 10 };
+const DEV = { on: false, buf: "", HASH: 707363094, LEN: 11 };
 try { DEV.on = localStorage.getItem("orcslasher_dev") === "1"; } catch (e) { /* no storage */ }
 function djb2(s) { let h = 5381; for (const c of s) { h = (((h << 5) + h) ^ c.charCodeAt(0)) >>> 0; } return h; }
 // password prompt opened by the key button in the menu corner.
