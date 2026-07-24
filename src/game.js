@@ -10,7 +10,7 @@ ctx.imageSmoothingEnabled = false;
 const VW = canvas.width, VH = canvas.height;
 
 const TILE = 16;
-const MAP_W = 44, MAP_H = 26;
+const MAP_W = 58, MAP_H = 34;
 const WORLD_W = MAP_W * TILE, WORLD_H = MAP_H * TILE;
 const FINAL_WAVE = 10;
 
@@ -60,6 +60,10 @@ const ANIM = {
   ogre_run: ["ogre_run_f0", "ogre_run_f1", "ogre_run_f2", "ogre_run_f3"],
   warchief_idle: ["orc_warchief_idle_f0", "orc_warchief_idle_f1", "orc_warchief_idle_f2", "orc_warchief_idle_f3"],
   warchief_run: ["orc_warchief_run_f0", "orc_warchief_run_f1", "orc_warchief_run_f2", "orc_warchief_run_f3"],
+  cave_goblin_idle: ["cave_goblin_idle_f0", "cave_goblin_idle_f1", "cave_goblin_idle_f2", "cave_goblin_idle_f3"],
+  cave_goblin_run: ["cave_goblin_run_f0", "cave_goblin_run_f1", "cave_goblin_run_f2", "cave_goblin_run_f3"],
+  soulcaller_idle: ["orc_soulcaller_idle_f0", "orc_soulcaller_idle_f1", "orc_soulcaller_idle_f2", "orc_soulcaller_idle_f3"],
+  soulcaller_run: ["orc_soulcaller_run_f0", "orc_soulcaller_run_f1", "orc_soulcaller_run_f2", "orc_soulcaller_run_f3"],
   butcher_idle: ["orc_butcher_idle_f0", "orc_butcher_idle_f1", "orc_butcher_idle_f2", "orc_butcher_idle_f3"],
   butcher_run: ["orc_butcher_run_f0", "orc_butcher_run_f1", "orc_butcher_run_f2", "orc_butcher_run_f3"],
   shamanking_idle: ["orc_shamanking_idle_f0", "orc_shamanking_idle_f1", "orc_shamanking_idle_f2", "orc_shamanking_idle_f3"],
@@ -74,7 +78,7 @@ const ANIM = {
   slash: ["slash_f0", "slash_f1", "slash_f2"],
 };
 // CraftPix 4-direction orcs + recolor variants (see assets/CREDITS.md)
-for (const p of ["cp_orc1", "cp_orc2", "cp_orc3", "cp_frost", "cp_night", "cp_blood"]) {
+for (const p of ["cp_orc1", "cp_orc2", "cp_orc3", "cp_frost", "cp_night", "cp_blood", "cp_savage", "cp_veteran", "cp_ghost"]) {
   for (const d of ["d", "u", "l", "r"]) {
     ANIM[`${p}_idle_${d}`] = [0, 1, 2, 3].map(f => `${p}_idle_${d}_f${f}`);
     ANIM[`${p}_run_${d}`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `${p}_run_${d}_f${f}`);
@@ -252,7 +256,7 @@ function animFrame(list, t, fps = 8) {
 let floorCanvas = null;
 let solids = []; // {x,y,w,h} world-space rects
 
-let mushrooms = [], torches = [], kingPos = null;
+let mushrooms = [], torches = [], spawnPits = [], kingPos = null;
 
 function buildMap() {
   solids = [];
@@ -292,6 +296,21 @@ function buildMap() {
   }
   kingPos = { x: (MAP_W - 3) * TILE + 8, y: (kty + 1) * TILE + 2 };
 
+  // two great spawn pits on opposite flanks — the horde crawls out of these
+  spawnPits = [];
+  const pitSpots = [
+    { tx: irnd(8, 14), ty: irnd(8, MAP_H - 9) },
+    { tx: irnd(MAP_W - 15, MAP_W - 9), ty: irnd(8, MAP_H - 9) },
+  ];
+  for (const p of pitSpots) {
+    for (let ty = p.ty - 2; ty <= p.ty + 2; ty++) { // keep the mouths clear of rock
+      for (let tx = p.tx - 3; tx <= p.tx + 3; tx++) {
+        if (ty > 0 && ty < MAP_H - 1 && tx > 0 && tx < MAP_W - 1) rock[ty][tx] = false;
+      }
+    }
+    spawnPits.push({ x: p.tx * TILE + 8, y: p.ty * TILE + 8 });
+  }
+
   // draw tiles (fallback fills survive a stale-cache sprite mismatch)
   const tileDraw = (name, x, y, fb) => {
     const im = IMG[name];
@@ -310,6 +329,21 @@ function buildMap() {
     for (let tx = 0; tx < MAP_W; tx++) {
       if (rock[ty][tx] && !rock[ty + 1][tx]) fc.fillRect(tx * TILE, ty * TILE + TILE - 2, TILE, 2);
     }
+  }
+  // the pit mouths: black depth fading to a lit far rim
+  for (const p of spawnPits) {
+    const grad = fc.createRadialGradient(p.x, p.y, 3, p.x, p.y, 26);
+    grad.addColorStop(0, "rgba(4,3,8,1)");
+    grad.addColorStop(0.62, "rgba(10,8,16,0.96)");
+    grad.addColorStop(0.82, "rgba(30,24,32,0.55)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    fc.save();
+    fc.translate(p.x, p.y); fc.scale(1, 0.62); fc.translate(-p.x, -p.y);
+    fc.fillStyle = grad;
+    fc.fillRect(p.x - 28, p.y - 28, 56, 56);
+    fc.restore();
+    fc.fillStyle = "rgba(96,80,86,0.45)";
+    fc.fillRect(p.x - 14, p.y - 11, 28, 2);
   }
   // solids: merge horizontal runs of rock per row
   for (let ty = 0; ty < MAP_H; ty++) {
@@ -575,6 +609,9 @@ function bossLine(type) {
   if (type === "warchief") {
     return G.kingSeen ? "Warchief! You hanged my King!" : "The Warchief himself… hold on, for the King!";
   }
+  if (type === "orc_soulcaller") {
+    return "He raises the dead… stay strong, for the King!";
+  }
   return "A false king of shamans… mine was worth ten of you.";
 }
 
@@ -590,23 +627,31 @@ const E_TYPES = {
   masked_orc: { anim: "masked_orc", hp: 16, spd: 58, dmg: 7, xp: 2, r: 5, scale: 1, score: 2 },
   orc_shaman: { anim: "orc_shaman", hp: 14, spd: 30, dmg: 7, xp: 3, r: 5, scale: 1, ranged: true, score: 3 },
   orc_berserker: { anim: "orc_berserker", hp: 30, spd: 40, dmg: 11, xp: 4, r: 5, scale: 1, rage: true, score: 4 },
+  cave_goblin: { anim: "cave_goblin", hp: 6, spd: 68, dmg: 4, xp: 1, r: 4, scale: 1, score: 1 },
+  orc_savage: { dirAnim: "cp_savage", hp: 18, spd: 46, dmg: 8, xp: 2, r: 5, scale: 1, score: 2 },
+  orc_veteran: { dirAnim: "cp_veteran", hp: 48, spd: 30, dmg: 12, xp: 5, r: 6, scale: 1, score: 5 },
+  ghost_orc: { dirAnim: "cp_ghost", hp: 10, spd: 72, dmg: 6, xp: 1, r: 4, scale: 1, ghost: true, score: 2 },
   ogre: { anim: "ogre", hp: 150, spd: 22, dmg: 18, xp: 12, r: 10, scale: 1, big: true, score: 10 },
   warchief: { anim: "warchief", hp: 750, spd: 30, dmg: 22, xp: 40, r: 9, scale: 2, boss: true, bossBar: true, big: true, score: 50 },
   orc_butcher: { anim: "butcher", hp: 300, spd: 32, dmg: 20, xp: 20, r: 10, scale: 2, big: true, bossBar: true, charge: true, score: 30 },
   orc_shamanking: { anim: "shamanking", hp: 340, spd: 26, dmg: 10, xp: 25, r: 8, scale: 2, big: true, bossBar: true, ranged: true, king: true, score: 40 },
+  orc_soulcaller: { anim: "soulcaller", hp: 380, spd: 24, dmg: 14, xp: 30, r: 8, scale: 2, big: true, bossBar: true, souls: true, score: 45 },
 };
 
-const BOSS_CYCLE = ["orc_butcher", "warchief", "orc_shamanking"];
-const BOSS_NAMES = { orc_butcher: "THE BUTCHER", warchief: "THE WARCHIEF", orc_shamanking: "THE SHAMAN KING" };
+const BOSS_CYCLE = ["orc_butcher", "warchief", "orc_soulcaller", "orc_shamanking"];
+const BOSS_NAMES = { orc_butcher: "THE BUTCHER", warchief: "THE WARCHIEF", orc_soulcaller: "THE SOULCALLER", orc_shamanking: "THE SHAMAN KING" };
 const bossFor = w => BOSS_CYCLE[(Math.floor(w / 5) - 1 + BOSS_CYCLE.length) % BOSS_CYCLE.length];
 
 function waveComposition(w) {
   const list = [];
   const add = (type, n) => { for (let i = 0; i < n; i++) list.push(type); };
   add("goblin", clamp(8 + w * 2, 0, 26));
+  add("cave_goblin", 3 + w);
   if (w >= 1) add("orc_warrior", 2 + Math.floor(w * 1.6));
+  if (w >= 2) add("orc_savage", w);
   if (w >= 3) add("orc_blade", w);
   if (w >= 3) add("masked_orc", w - 1);
+  if (w >= 6) add("orc_veteran", Math.floor(w / 3));
   if (w >= 4) add("orc_shaman", Math.floor(w / 2) + 1);
   if (w >= 5) add("orc_berserker", w - 3);
   if (w >= 5) add("frost_orc", Math.floor(w / 2) - 1);
@@ -639,22 +684,24 @@ function startWave(w) {
 
 function spawnPointFor() {
   const blocked = (x, y) => solids.some(s => x > s.x - 6 && x < s.x + s.w + 6 && y > s.y - 6 && y < s.y + s.h + 6);
-  // random point near an edge, away from the player and out of the rock
+  // the horde climbs out of the spawn pits
   for (let i = 0; i < 40; i++) {
-    const side = irnd(0, 3);
-    let x, y;
-    if (side === 0) { x = rnd(TILE * 3, WORLD_W - TILE * 3); y = rnd(TILE * 3, TILE * 6); }
-    else if (side === 1) { x = rnd(TILE * 3, WORLD_W - TILE * 3); y = rnd(WORLD_H - TILE * 6, WORLD_H - TILE * 3); }
-    else if (side === 2) { x = rnd(TILE * 3, TILE * 6); y = rnd(TILE * 3, WORLD_H - TILE * 3); }
-    else { x = rnd(WORLD_W - TILE * 6, WORLD_W - TILE * 3); y = rnd(TILE * 3, WORLD_H - TILE * 3); }
+    const pit = pick(spawnPits);
+    const a = rnd(0, Math.PI * 2), r = rnd(4, 26);
+    const x = pit.x + Math.cos(a) * r, y = pit.y + Math.sin(a) * r * 0.7;
     if (dist({ x, y }, player) > 90 && !blocked(x, y)) return { x, y };
   }
-  return { x: TILE * 3, y: TILE * 3 };
+  // fallback: an edge point clear of rock
+  for (let i = 0; i < 40; i++) {
+    const x = rnd(TILE * 3, WORLD_W - TILE * 3), y = rnd(TILE * 3, WORLD_H - TILE * 3);
+    if (dist({ x, y }, player) > 120 && !blocked(x, y)) return { x, y };
+  }
+  return { x: WORLD_W / 2 + 80, y: TILE * 4 };
 }
 
-function spawnEnemy(type) {
+function spawnEnemy(type, at) {
   const t = E_TYPES[type];
-  const p = spawnPointFor();
+  const p = at || spawnPointFor();
   const mult = 1 + 0.20 * (G.wave - 1);
   enemies.push({
     type, ...p, r: t.r, anim: t.anim, dirAnim: t.dirAnim, dir: "d", scale: t.scale,
@@ -662,7 +709,7 @@ function spawnEnemy(type) {
     spd: t.spd * (1 + 0.02 * (G.wave - 1)) * rnd(0.9, 1.1),
     dmg: t.dmg * (1 + 0.06 * (G.wave - 1)),
     xp: t.xp, ranged: !!t.ranged, rage: !!t.rage, big: !!t.big, boss: !!t.boss,
-    bossBar: !!t.bossBar, charge: !!t.charge, king: !!t.king,
+    bossBar: !!t.bossBar, charge: !!t.charge, king: !!t.king, souls: !!t.souls, ghost: !!t.ghost,
     score: t.score,
     atkCd: rnd(0, 1), animT: rnd(0, 9), facing: 1, hitFlash: 0, warmup: 0.8,
     summonCd: 6, strafe: rnd(0, Math.PI * 2), chargeCd: 4, chargeT: 0,
@@ -840,7 +887,7 @@ function killEnemy(e) {
   for (let i = 0; i < gemCount; i++) {
     gems.push({ x: e.x + rnd(-8, 8), y: e.y + rnd(-6, 6), v: e.xp / gemCount, t: rnd(0, 9), vx: rnd(-30, 30), vy: rnd(-60, -20) });
   }
-  const coinCount = e.big ? 3 : (Math.random() < 0.3 * (1 + player.stats.goldDig) ? 1 : 0);
+  const coinCount = e.ghost ? 0 : (e.big ? 3 : (Math.random() < 0.3 * (1 + player.stats.goldDig) ? 1 : 0));
   for (let i = 0; i < coinCount; i++) coins.push({ x: e.x + rnd(-6, 6), y: e.y + rnd(-4, 4), t: rnd(0, 9), vx: rnd(-25, 25), vy: rnd(-50, -20) });
   if (Math.random() < (e.big ? 0.8 : 0.04)) flasks.push({ x: e.x, y: e.y, t: 0 });
   if (e.big && Math.random() < 0.001) { // 0.1% relic drop from bosses
@@ -1220,7 +1267,16 @@ function updatePlay(dt) {
         e.summonCd = 7;
         texts.push({ x: e.x, y: e.y - 40, s: "WAAAGH!", life: 1.2, col: "#ff6b6b", big: true });
         SFX.bossRoar();
-        for (let i = 0; i < 3; i++) spawnEnemy("goblin");
+        for (let i = 0; i < 3; i++) spawnEnemy("goblin", { x: e.x + rnd(-34, 34), y: e.y + rnd(-26, 26) });
+      }
+    }
+    if (e.souls) { // the soulcaller raises ghost orcs around himself
+      e.summonCd -= dt;
+      if (e.summonCd <= 0) {
+        e.summonCd = 6;
+        texts.push({ x: e.x, y: e.y - 40, s: "RISE, MY FALLEN!", life: 1.4, col: "#78ffdc", big: true });
+        beep(180, 0.5, "sine", 0.09, 240);
+        for (let i = 0; i < 4; i++) spawnEnemy("ghost_orc", { x: e.x + rnd(-38, 38), y: e.y + rnd(-30, 30) });
       }
     }
     const tl = Math.hypot(tx, ty) || 1;
@@ -1669,7 +1725,9 @@ function drawEnemy(e) {
   if (e.hitFlash > 0) ctx.filter = "brightness(2.5)";
   const enraged = e.rage && e.hp < e.maxHp * 0.5;
   if (enraged) ctx.filter = "brightness(1.4) saturate(1.6)";
+  if (e.ghost) ctx.globalAlpha = 0.62 + Math.sin(e.animT * 6) * 0.1;
   drawSprite(animFrame(list, e.animT, enraged ? 14 : 10), e.x, e.y + (e.dirAnim ? 6 : 4), flip, e.scale);
+  ctx.globalAlpha = 1;
   ctx.filter = "none";
   // hp bar
   if (e.hp < e.maxHp) {

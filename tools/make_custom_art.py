@@ -288,6 +288,84 @@ warchief("orc_warchief_run_f1", WCH_LEGS_STAND, 0)
 warchief("orc_warchief_run_f2", WCH_LEGS_B, 1)
 warchief("orc_warchief_run_f3", WCH_LEGS_STAND, 0)
 
+# ------------------------------------------------------ cave goblin --------
+# pale swarm goblin: 0x72 goblin recolored toward cave-blind blue-grey.
+
+
+def recolor_goblin(src, dst):
+    img = Image.open(src).convert("RGBA")
+    px = img.load()
+    for y in range(img.height):
+        for x in range(img.width):
+            r, g, b, a = px[x, y]
+            if a and g > r * 1.05 and g > 60:  # green skin
+                h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+                r2, g2, b2 = colorsys.hls_to_rgb(0.52, min(1, l * 1.25), s * 0.45)
+                px[x, y] = (int(r2 * 255), int(g2 * 255), int(b2 * 255), a)
+    img.save(dst)
+
+
+for anim in ("idle", "run"):
+    for f in range(4):
+        recolor_goblin(
+            os.path.join(SPRITES, f"goblin_{anim}_anim_f{f}.png"),
+            os.path.join(OUT, f"cave_goblin_{anim}_f{f}.png"),
+        )
+
+# ---------------------------------------------------- orc soulcaller boss --
+# summons the ghosts of fallen orcs: spectral skin, tattered robe, skull staff.
+SOU_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "G": (152, 192, 162, 255), # spectral skin
+    "g": (104, 142, 118, 255), # skin shade
+    "D": (42, 52, 56, 255),    # robe
+    "d": (60, 74, 78, 255),    # robe light
+    "E": (120, 255, 220, 255), # glowing eyes / wisps
+    "T": (238, 234, 220, 255), # tusks
+    "S": (222, 216, 196, 255), # bone staff
+    "s": (176, 168, 148, 255), # staff shade
+    "W": (245, 242, 230, 255), # staff skull
+}
+
+SOU_TOP = """
+..E...KKKKKK...E..
+.....KDDDDDDK.....
+....KDDDDDDDDK....
+....KDGGGGGGDK.KK.
+....KDGEGGEGDKKWWK
+....KDGGGGGGDKWWWK
+....KDTGGGTGDKKWK.
+.....KGTTTGGK.KsK.
+....KDDDDDDDDKKSK.
+...KDDDDDDDDDDKSK.
+..KDdDDDDDDdDKKSK.
+..KGKDDDDDDKGKKSK.
+..KGKdDDDDdKGKKsK.
+..KKKdDDDDdKKKKSK.
+....KdDDDDdK..KsK.
+....KDDDDDDK..KSK.
+...KDDDDDDDDK.KK..
+""".strip("\n")
+
+SOU_LEGS_STAND = """
+...KdDDDDDDdK.....
+....KKKKKKKK......
+""".strip("\n")
+
+
+def soulcaller(name, bob):
+    save_grid(name, ("." * 18 + "\n") * bob + SOU_TOP + "\n" + SOU_LEGS_STAND, SOU_PAL)
+
+
+soulcaller("orc_soulcaller_idle_f0", 1)
+soulcaller("orc_soulcaller_idle_f1", 0)
+soulcaller("orc_soulcaller_idle_f2", 0)
+soulcaller("orc_soulcaller_idle_f3", 1)
+soulcaller("orc_soulcaller_run_f0", 1)
+soulcaller("orc_soulcaller_run_f1", 0)
+soulcaller("orc_soulcaller_run_f2", 1)
+soulcaller("orc_soulcaller_run_f3", 0)
+
 # ------------------------------------------------------ orc butcher boss ---
 # wave-5 boss: fat orc in a blood-stained apron, cleaver in fist.
 BUT_PAL = {

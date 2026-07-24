@@ -14,6 +14,9 @@ VARIANTS = [
     ("cp_orc1", "cp_frost", 0.55, 1.05, 0.9, False),
     ("cp_orc3", "cp_night", 0.78, 0.95, 0.9, False),
     ("cp_orc2", "cp_blood", 0.99, 1.0, 1.0, True),
+    ("cp_orc1", "cp_savage", 0.13, 0.95, 1.1, False),   # olive-brown savage
+    ("cp_orc3", "cp_veteran", 0.58, 0.9, 0.35, False),  # grizzled steel-grey
+    ("cp_orc1", "cp_ghost", 0.45, 1.35, 0.75, False),   # pale spectral green
 ]
 
 
