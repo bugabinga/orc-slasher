@@ -362,6 +362,154 @@ save_grid("weapon_scythe", """
 .......K........
 """, SCYTHE_PAL)
 
+# ------------------------------------------------------------- the nun -----
+# proper nun: black habit, white coif around the face, gold cross.
+NUN_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "B": (40, 36, 48, 255),    # habit black
+    "b": (58, 53, 68, 255),    # habit highlight
+    "W": (238, 236, 228, 255), # coif white
+    "F": (228, 186, 152, 255), # skin
+    "f": (198, 152, 120, 255), # skin shade
+    "Y": (226, 180, 62, 255),  # gold cross
+}
+
+NUN_TOP = """
+.....KKKK.....
+....KBBBBK....
+...KBBBBBBK...
+...KBWWWWBK...
+...KBWFFWBK...
+...KBWFFWBK...
+...KBWfFWBK...
+....KWFFWK....
+....KBWWBK....
+...KBBBBBBK...
+..KBBBWWBBBK..
+..KBBBWYWBBK..
+..KBbBBYBBbK..
+..KBbBBBBBbK..
+...KBBBBBBK...
+...KBBBBBBK...
+""".strip("\n")
+
+NUN_LEGS_STAND = """
+...KBBBBBBK...
+....KbKKbK....
+....KK..KK....
+""".strip("\n")
+
+NUN_LEGS_A = """
+...KBBBBBBK...
+...KbK..KbK...
+...KK....KK...
+""".strip("\n")
+
+NUN_LEGS_B = """
+...KBBBBBBK...
+....KbKKbK....
+...KK....KK...
+""".strip("\n")
+
+
+def nun(name, legs, bob):
+    save_grid(name, ("." * 14 + "\n") * bob + NUN_TOP + "\n" + legs, NUN_PAL)
+
+
+nun("nun_idle_f0", NUN_LEGS_STAND, 1)
+nun("nun_idle_f1", NUN_LEGS_STAND, 0)
+nun("nun_idle_f2", NUN_LEGS_STAND, 0)
+nun("nun_idle_f3", NUN_LEGS_STAND, 1)
+nun("nun_run_f0", NUN_LEGS_A, 1)
+nun("nun_run_f1", NUN_LEGS_STAND, 0)
+nun("nun_run_f2", NUN_LEGS_B, 1)
+nun("nun_run_f3", NUN_LEGS_STAND, 0)
+
+# --------------------------------------------------------- quasimodo -------
+# hunched bell-ringer: hump on the back, head pushed forward, ragged tunic.
+QUA_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "D": (58, 44, 34, 255),    # messy hair
+    "F": (224, 178, 140, 255), # skin
+    "f": (192, 142, 106, 255), # skin shade
+    "T": (134, 96, 58, 255),   # tunic
+    "t": (100, 70, 44, 255),   # tunic shade
+    "R": (146, 42, 40, 255),   # patched sleeve
+    "b": (62, 48, 38, 255),    # boots
+}
+
+QUA_TOP = """
+....KKK.........
+..KKTTTKK.......
+.KTTTTTTTK......
+.KTTTTTTTTKKK...
+.KtTTTTTKDDDDK..
+.KtTTTTKDDDDDDK.
+.KtTTTTKDFFFFDK.
+..KTTTTKFFfFFK..
+..KTTTTKFFFFK...
+..KTTTTTKFFK....
+..KRTTTTTTTK....
+..KRtTTTTTTK....
+...KtTTTTTK.....
+""".strip("\n")
+
+QUA_LEGS_STAND = """
+...KTTKKTTK.....
+....KbK.KbK.....
+....KK..KK......
+""".strip("\n")
+
+QUA_LEGS_A = """
+...KTTK.KTTK....
+...KbK...KbK....
+...KK.....KK....
+""".strip("\n")
+
+QUA_LEGS_B = """
+...KTTKKTTK.....
+...KbK...KbK....
+....KK...KK.....
+""".strip("\n")
+
+
+def quasi(name, legs, bob):
+    save_grid(name, ("." * 16 + "\n") * bob + QUA_TOP + "\n" + legs, QUA_PAL)
+
+
+quasi("quasi_idle_f0", QUA_LEGS_STAND, 1)
+quasi("quasi_idle_f1", QUA_LEGS_STAND, 0)
+quasi("quasi_idle_f2", QUA_LEGS_STAND, 0)
+quasi("quasi_idle_f3", QUA_LEGS_STAND, 1)
+quasi("quasi_run_f0", QUA_LEGS_A, 1)
+quasi("quasi_run_f1", QUA_LEGS_STAND, 0)
+quasi("quasi_run_f2", QUA_LEGS_B, 1)
+quasi("quasi_run_f3", QUA_LEGS_STAND, 0)
+
+# ---------------------------------------------------------- molotov --------
+MOL_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "R": (238, 130, 32, 255),  # rag flame
+    "r": (252, 210, 96, 255),  # flame core
+    "W": (222, 214, 196, 255), # rag cloth
+    "G": (94, 138, 110, 200),  # green glass
+    "g": (66, 104, 82, 220),   # glass shade
+    "Y": (206, 142, 38, 255),  # amber liquid
+}
+save_grid("weapon_molotov", """
+...Rr...
+...RR...
+..KWRK..
+..KWK...
+..KGgK..
+..KGgK..
+.KGGGgK.
+.KGYYgK.
+.KGYYgK.
+.KGYYgK.
+..KKKK..
+""", MOL_PAL)
+
 # ---------------------------------------------------------- upgrade card ---
 # 44x60 parchment card with gold pixel corners, used by the level-up UI.
 card = Image.new("RGBA", (44, 60), (0, 0, 0, 0))

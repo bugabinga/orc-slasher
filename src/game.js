@@ -30,8 +30,10 @@ const ANIM = {
   hero_run: ["knight_m_run_f0", "knight_m_run_f1", "knight_m_run_f2", "knight_m_run_f3"],
   barbar_idle: ["dwarf_m_idle_f0", "dwarf_m_idle_f1", "dwarf_m_idle_f2", "dwarf_m_idle_f3"],
   barbar_run: ["dwarf_m_run_f0", "dwarf_m_run_f1", "dwarf_m_run_f2", "dwarf_m_run_f3"],
-  nun_idle: ["angel_idle_f0", "angel_idle_f1", "angel_idle_f2", "angel_idle_f3"],
-  nun_run: ["angel_run_f0", "angel_run_f1", "angel_run_f2", "angel_run_f3"],
+  nun_idle: ["nun_idle_f0", "nun_idle_f1", "nun_idle_f2", "nun_idle_f3"],
+  nun_run: ["nun_run_f0", "nun_run_f1", "nun_run_f2", "nun_run_f3"],
+  quasi_idle: ["quasi_idle_f0", "quasi_idle_f1", "quasi_idle_f2", "quasi_idle_f3"],
+  quasi_run: ["quasi_run_f0", "quasi_run_f1", "quasi_run_f2", "quasi_run_f3"],
   reaper_idle: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
   reaper_run: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
   goblin_idle: ["goblin_idle_f0", "goblin_idle_f1", "goblin_idle_f2", "goblin_idle_f3"],
@@ -89,6 +91,7 @@ const SFX = {
   gem: () => beep(880, 0.07, "sine", 0.07, 240),
   coinS: () => beep(1180, 0.06, "sine", 0.05, 120),
   hurt: () => beep(90, 0.25, "square", 0.1, -50),
+  boom: () => { beep(60, 0.35, "sawtooth", 0.14, -30); beep(240, 0.18, "square", 0.06, -180); },
   level: () => { beep(520, 0.09, "square", 0.06); setTimeout(() => beep(660, 0.09, "square", 0.06), 90); setTimeout(() => beep(880, 0.14, "square", 0.06), 180); },
   card: () => beep(440, 0.08, "triangle", 0.08, 100),
   dash: () => beep(300, 0.1, "sine", 0.05, 300),
@@ -231,7 +234,7 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, arrows, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, arrows, molotovs, firePatches, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
@@ -241,6 +244,8 @@ const WEAPONS = {
   whip: { name: "Whip", desc: "long lash, narrow snap", sprite: "weapon_whip", dmg: 6, atkSpd: 1.5, range: 60, arc: 0.55 },
   spear: { name: "Spear", desc: "long thrust, pierces a line", sprite: "weapon_spear", dmg: 9, atkSpd: 1.2, range: 55, arc: 0.45 },
   scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 15, atkSpd: 0.75, range: 44, arc: 2.4, unlock: "scythe" },
+  molotov: { name: "Molotov", desc: "lobbed firebomb, burns the ground", sprite: "weapon_molotov", dmg: 12, atkSpd: 0.6, range: 130, arc: 0, thrown: true },
+  shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 4, atkSpd: 2.5, range: 24, arc: 1.2 },
 };
 
 // classes -------------------------------------------------------------------
@@ -252,6 +257,8 @@ const CLASSES = {
   nun: { name: "Nun", anim: "nun", desc: "+1.2 HP/s, +20% XP, -15% dmg", unlock: "nun",
     weapons: ["whip", "bow"],
     mods: s => { s.regen += 1.2; s.xpGain *= 1.20; s.dmg *= 0.85; s.maxHp = 55; } },
+  quasi: { name: "Quasimodo", anim: "quasi", desc: "hunched & hardy: 75 HP, a bit slow", weapons: ["molotov", "shiv"],
+    mods: s => { s.maxHp = 75; s.moveSpd *= 0.95; } },
   reaper: { name: "Reaper", anim: "reaper", desc: "+20% dmg, 3% lifesteal, frail", unlock: "reaper",
     weapons: ["scythe", "knives"],
     mods: s => { s.dmg *= 1.20; s.lifesteal += 0.03; s.maxHp = 45; s.moveSpd *= 1.05; } },
@@ -285,7 +292,7 @@ function newRun(weaponId) {
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; molotovs = []; firePatches = []; fx = []; texts = [];
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false;
   startWave(1);
@@ -549,6 +556,39 @@ function playerMeleeAttack() {
   }
 }
 
+function playerMolotovAttack() {
+  const st = player.stats;
+  const target = nearestEnemy(player, st.range);
+  if (!target) return;
+  player.atkCd = 1 / st.atkSpd;
+  const ang = Math.atan2(target.y - player.y, target.x - player.x);
+  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
+  player.atkAng = ang;
+  const d = dist(player, target);
+  molotovs.push({
+    sx: player.x, sy: player.y - 10, tx: target.x, ty: target.y,
+    x: player.x, y: player.y - 10, t: 0, dur: clamp(d / 150, 0.45, 1.0), spin: 0,
+  });
+  SFX.slash();
+}
+
+function explodeMolotov(m) {
+  const st = player.stats;
+  SFX.boom();
+  G.shake = Math.max(G.shake, 4);
+  firePatches.push({ x: m.tx, y: m.ty, life: 2.4, max: 2.4, tick: 0, seed: Math.random() * 9 });
+  for (const e of [...enemies]) {
+    if (e.warmup > 0) continue;
+    if (Math.hypot(e.x - m.tx, e.y - m.ty) < 30 + e.r) {
+      const crit = Math.random() < st.crit;
+      damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+    }
+  }
+  for (let i = 0; i < 12; i++) {
+    fx.push({ kind: "spark", x: m.tx, y: m.ty - 2, vx: rnd(-70, 70), vy: rnd(-90, -10), life: rnd(0.25, 0.6), max: 0.6 });
+  }
+}
+
 function playerBowAttack() {
   const st = player.stats;
   const target = nearestEnemy(player, st.range);
@@ -602,7 +642,29 @@ function updatePlay(dt) {
     } else if (player.atkCd <= 0) {
       playerBowAttack();
     }
+  } else if (WEAPONS[G.weapon].thrown) {
+    if (player.atkCd <= 0) playerMolotovAttack();
   } else if (player.atkCd <= 0) playerMeleeAttack();
+
+  // -- molotovs & burning ground
+  for (const m of [...molotovs]) {
+    m.t += dt; m.spin += dt * 9;
+    const p = m.t / m.dur;
+    if (p >= 1) { molotovs.splice(molotovs.indexOf(m), 1); explodeMolotov(m); continue; }
+    m.x = m.sx + (m.tx - m.sx) * p;
+    m.y = m.sy + (m.ty - m.sy) * p - Math.sin(Math.PI * p) * 26;
+  }
+  for (const f of [...firePatches]) {
+    f.life -= dt; f.tick -= dt;
+    if (f.life <= 0) { firePatches.splice(firePatches.indexOf(f), 1); continue; }
+    if (f.tick <= 0) {
+      f.tick = 0.45;
+      for (const e of [...enemies]) {
+        if (e.warmup > 0) continue;
+        if (Math.hypot(e.x - f.x, e.y - f.y) < 24 + e.r) damageEnemy(e, st.dmg * 0.3 * rnd(0.85, 1.15), false);
+      }
+    }
+  }
 
   // -- spawning
   spawnTimer += dt;
@@ -731,7 +793,7 @@ function updatePlay(dt) {
   // -- fx / texts
   for (const p of [...fx]) {
     p.life -= dt;
-    if (p.kind === "blood") { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; }
+    if (p.kind === "blood" || p.kind === "spark") { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; }
     if (p.life <= 0) fx.splice(fx.indexOf(p), 1);
   }
   for (const t of [...texts]) {
@@ -788,6 +850,23 @@ function renderWorld() {
   ctx.translate(-Math.round(cx), -Math.round(cy));
   ctx.drawImage(floorCanvas, 0, 0);
 
+  // burning ground under everything
+  for (const f of firePatches) {
+    const a = clamp(f.life / f.max, 0, 1);
+    const g2 = ctx.createRadialGradient(f.x, f.y, 2, f.x, f.y, 26);
+    g2.addColorStop(0, `rgba(252,150,50,${0.30 * a})`);
+    g2.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g2;
+    ctx.fillRect(f.x - 26, f.y - 26, 52, 52);
+    for (let i = 0; i < 8; i++) {
+      const ang2 = f.seed + i * 0.785 + G.t * (2 + (i % 3));
+      const r2 = 4 + ((i * 37) % 14);
+      const fxp = f.x + Math.cos(ang2) * r2, fyp = f.y + Math.sin(ang2) * r2 * 0.6;
+      const flick = Math.sin(G.t * 11 + i * 2 + f.seed) * 0.5 + 0.5;
+      ctx.fillStyle = i % 3 === 0 ? `rgba(252,210,96,${0.9 * a * flick})` : `rgba(238,110,32,${0.8 * a * flick})`;
+      ctx.fillRect(Math.round(fxp), Math.round(fyp - flick * 3), 2, 2 + Math.round(flick * 2));
+    }
+  }
   // corpses under everything
   for (const p of fx) if (p.kind === "corpse") {
     const list = ANIM[p.anim];
@@ -814,6 +893,12 @@ function renderWorld() {
   for (const d of drawables) d.draw();
 
   // projectiles & fx above
+  for (const m of molotovs) {
+    ctx.save(); ctx.translate(Math.round(m.x), Math.round(m.y)); ctx.rotate(m.spin);
+    const im = IMG.weapon_molotov;
+    ctx.drawImage(im, -im.width / 2, -im.height / 2);
+    ctx.restore();
+  }
   for (const a of arrows) {
     ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.ang + Math.PI / 2);
     const im = IMG.weapon_arrow;
@@ -824,6 +909,9 @@ function renderWorld() {
   for (const p of fx) {
     if (p.kind === "blood") {
       ctx.fillStyle = `rgba(110,180,60,${p.life / p.max})`;
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+    } else if (p.kind === "spark") {
+      ctx.fillStyle = `rgba(252,${140 + Math.round(90 * p.life / p.max)},50,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
     } else if (p.kind === "slash") {
       const f = ANIM.slash[Math.min(2, Math.floor((1 - p.life / p.max) * 3))];
@@ -905,10 +993,10 @@ function drawPlayer() {
     ctx.drawImage(im, -im.width / 2, -im.height + 3);
     ctx.restore();
   } else {
-    const swing = (wdef.ranged || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
+    const swing = (wdef.ranged || wdef.thrown || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
     ctx.save();
     ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
-    ctx.rotate(player.facing * (wdef.ranged ? 0.15 : 0.5 + swing));
+    ctx.rotate(player.facing * ((wdef.ranged || wdef.thrown) ? 0.15 : 0.5 + swing));
     ctx.scale(player.facing, 1);
     ctx.drawImage(im, -2, -im.height + 4);
     ctx.restore();
@@ -967,6 +1055,8 @@ function renderDarkness(cx, cy) {
   };
   punch(player.x, player.y, 135, 0.95);
   for (const b of bolts) punch(b.x, b.y, 22, 0.8);
+  for (const f of firePatches) punch(f.x, f.y, 55, 0.85 * clamp(f.life / f.max + 0.3, 0, 1));
+  for (const m of molotovs) punch(m.x, m.y, 18, 0.7);
   let n = 0;
   for (const e of enemies) { if (n++ > 50) break; punch(e.x, e.y, e.big ? 40 : 24, 0.45); }
   for (const g2 of gems) punch(g2.x, g2.y, 10, 0.5);
@@ -1166,7 +1256,7 @@ function renderClassSelect(t) {
 
   clsRects = [];
   const ids = Object.keys(CLASSES);
-  const cw = 102, chh = 140, gap = 14;
+  const cw = 88, chh = 140, gap = 8;
   const total = ids.length * cw + (ids.length - 1) * gap;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], c = CLASSES[id];
@@ -1191,7 +1281,7 @@ function renderClassSelect(t) {
     }
   }
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText("click or press 1·2·3·4", VW / 2, VH - 12);
+  ctx.fillText(`click or press 1-${ids.length}`, VW / 2, VH - 12);
 }
 
 // weapon select --------------------------------------------------------------
