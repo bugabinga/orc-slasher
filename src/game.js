@@ -70,14 +70,52 @@ for (const p of ["cp_orc1", "cp_orc2", "cp_orc3", "cp_frost", "cp_night", "cp_bl
   ANIM[`${p}_death`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `${p}_death_f${f}`);
 }
 
+// sound settings ------------------------------------------------------------
+const SND = { music: true, sfx: true };
+try { Object.assign(SND, JSON.parse(localStorage.getItem("orcslasher_sound") || "{}")); } catch (e) { /* no storage */ }
+function saveSound() { try { localStorage.setItem("orcslasher_sound", JSON.stringify(SND)); } catch (e) { /* no storage */ } }
+
 // tiny synth ---------------------------------------------------------------
 let AC = null;
 function audio() {
   if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
   if (AC.state === "suspended") AC.resume();
+  startMusic();
   return AC;
 }
+
+// ambient cave loop: slow minor bassline + sparse arpeggio, all synthesized
+const MUSIC = { started: false, nextT: 0, step: 0 };
+const M_BASS = [55.0, 55.0, 65.41, 65.41, 43.65, 43.65, 49.0, 49.0]; // A1 C2 F1 G1
+const M_ARP = [220, 261.63, 329.63, 440, 329.63, 261.63];
+function mnote(freq, t, dur, type, vol) {
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(AC.destination);
+  o.start(t); o.stop(t + dur);
+}
+function startMusic() {
+  if (MUSIC.started || !AC) return;
+  MUSIC.started = true;
+  MUSIC.nextT = AC.currentTime + 0.1;
+  setInterval(() => {
+    while (MUSIC.nextT < AC.currentTime + 0.35) {
+      const s = MUSIC.step, t = MUSIC.nextT;
+      if (SND.music) {
+        if (s % 4 === 0) mnote(M_BASS[(s / 4) | 0], t, 1.25, "triangle", 0.05);
+        if (s % 2 === 0) mnote(M_ARP[(s / 2) % M_ARP.length] / 2, t, 0.30, "square", 0.011);
+        if (s % 8 === 4) mnote(2200, t, 0.03, "square", 0.005); // soft tick
+      }
+      MUSIC.step = (MUSIC.step + 1) % 32;
+      MUSIC.nextT += 0.33;
+    }
+  }, 120);
+}
+
 function beep(freq, dur, type = "square", vol = 0.08, slide = 0) {
+  if (!SND.sfx) return;
   try {
     const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.value = freq;
@@ -1311,10 +1349,49 @@ function wrapText(text, x, y, maxW, lh) {
   ctx.fillText(line, x, yy);
 }
 
-// key button + password modal ------------------------------------------------
+// key button + sound toggles + password modal --------------------------------
+let sndBtnRects = [];
+function menuButton(x, on) {
+  const r = { x, y: 6, w: 22, h: 20 };
+  ctx.fillStyle = on ? "rgba(36,28,46,0.9)" : "rgba(24,19,34,0.9)";
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = on ? "#8a6a30" : "#57506b"; ctx.lineWidth = 1;
+  ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  return r;
+}
+function slashOut(r) {
+  ctx.strokeStyle = "#e4485a"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(r.x + 4, r.y + r.h - 4); ctx.lineTo(r.x + r.w - 4, r.y + 4); ctx.stroke();
+}
 function drawKeyButton() {
+  sndBtnRects = [];
+  // music toggle
+  let r = menuButton(VW - 84, SND.music);
+  const mc = SND.music ? "#e8dfc8" : "#57506b";
+  ctx.fillStyle = mc;
+  ctx.fillRect(r.x + 5, r.y + 13, 3, 3);  // note heads
+  ctx.fillRect(r.x + 12, r.y + 12, 3, 3);
+  ctx.fillRect(r.x + 7, r.y + 5, 1, 9);   // stems
+  ctx.fillRect(r.x + 14, r.y + 4, 1, 9);
+  ctx.fillRect(r.x + 7, r.y + 4, 8, 2);   // beam
+  if (!SND.music) slashOut(r);
+  sndBtnRects.push({ ...r, id: "music" });
+  // sfx toggle
+  r = menuButton(VW - 56, SND.sfx);
+  const sc = SND.sfx ? "#e8dfc8" : "#57506b";
+  ctx.fillStyle = sc;
+  ctx.fillRect(r.x + 4, r.y + 8, 3, 5);   // speaker body
+  ctx.beginPath();                         // cone
+  ctx.moveTo(r.x + 7, r.y + 8); ctx.lineTo(r.x + 11, r.y + 4);
+  ctx.lineTo(r.x + 11, r.y + 17); ctx.lineTo(r.x + 7, r.y + 13);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = sc; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(r.x + 12, r.y + 10.5, 4, -0.9, 0.9); ctx.stroke();
+  if (!SND.sfx) slashOut(r);
+  sndBtnRects.push({ ...r, id: "sfx" });
+  // dev key
   keyBtnRect = { x: VW - 28, y: 6, w: 22, h: 20 };
-  const r = keyBtnRect;
+  r = keyBtnRect;
   ctx.fillStyle = DEV.on ? "rgba(180,140,255,0.18)" : "rgba(36,28,46,0.9)";
   ctx.fillRect(r.x, r.y, r.w, r.h);
   ctx.strokeStyle = DEV.on ? "#b48cff" : "#57506b"; ctx.lineWidth = 1;
@@ -1581,6 +1658,16 @@ function handleKey(code) {
 function handleClick(x, y) {
   audio();
   if (passModal.open) return true; // modal swallows clicks; ESC/ENTER to leave
+  if (["title", "cls", "select"].includes(G.state)) {
+    for (const r of sndBtnRects) {
+      if (x >= r.x - 3 && x <= r.x + r.w + 3 && y >= r.y - 3 && y <= r.y + r.h + 3) {
+        SND[r.id] = !SND[r.id];
+        saveSound();
+        SFX.card();
+        return true;
+      }
+    }
+  }
   if (["title", "cls", "select"].includes(G.state) && keyBtnRect &&
       x >= keyBtnRect.x - 3 && x <= keyBtnRect.x + keyBtnRect.w + 3 &&
       y >= keyBtnRect.y - 3 && y <= keyBtnRect.y + keyBtnRect.h + 3) {
