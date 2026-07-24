@@ -48,14 +48,14 @@ const ANIM = {
   bolt: ["shaman_bolt_f0", "shaman_bolt_f1"],
   slash: ["slash_f0", "slash_f1", "slash_f2"],
 };
-// CraftPix 4-direction orcs (see assets/CREDITS.md): cp_orc1..3, dirs d/u/l/r
-for (let o = 1; o <= 3; o++) {
+// CraftPix 4-direction orcs + recolor variants (see assets/CREDITS.md)
+for (const p of ["cp_orc1", "cp_orc2", "cp_orc3", "cp_frost", "cp_night", "cp_blood"]) {
   for (const d of ["d", "u", "l", "r"]) {
-    ANIM[`cp_orc${o}_idle_${d}`] = [0, 1, 2, 3].map(f => `cp_orc${o}_idle_${d}_f${f}`);
-    ANIM[`cp_orc${o}_run_${d}`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `cp_orc${o}_run_${d}_f${f}`);
-    ANIM[`cp_orc${o}_attack_${d}`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `cp_orc${o}_attack_${d}_f${f}`);
+    ANIM[`${p}_idle_${d}`] = [0, 1, 2, 3].map(f => `${p}_idle_${d}_f${f}`);
+    ANIM[`${p}_run_${d}`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `${p}_run_${d}_f${f}`);
+    ANIM[`${p}_attack_${d}`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `${p}_attack_${d}_f${f}`);
   }
-  ANIM[`cp_orc${o}_death`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `cp_orc${o}_death_f${f}`);
+  ANIM[`${p}_death`] = [0, 1, 2, 3, 4, 5, 6, 7].map(f => `${p}_death_f${f}`);
 }
 
 // tiny synth ---------------------------------------------------------------
@@ -210,27 +210,35 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, axes, bolts, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
-function baseStats() {
+const WEAPONS = {
+  sword: { name: "Knight Sword", desc: "steady swings, wide arc", sprite: "weapon_regular_sword", dmg: 10, atkSpd: 1.0, range: 36, arc: 1.15 },
+  knives: { name: "Twin Knives", desc: "fast stabs, short reach, +move", sprite: "weapon_knife", dmg: 5, atkSpd: 2.2, range: 27, arc: 1.35 },
+};
+
+function baseStats(weaponId) {
+  const w = WEAPONS[weaponId];
   return {
-    maxHp: 60, dmg: 10, atkSpd: 1.1, moveSpd: 85, range: 50,
-    crit: 0.05, axes: 0, regen: 0, magnet: 28, xpGain: 1,
+    maxHp: 60, dmg: w.dmg, atkSpd: w.atkSpd, moveSpd: weaponId === "knives" ? 93 : 85,
+    range: w.range, arc: w.arc,
+    crit: 0.05, regen: 0, magnet: 28, xpGain: 1,
     armor: 0, lifesteal: 0,
   };
 }
 
-function newRun() {
+function newRun(weaponId) {
   buildMap();
+  G.weapon = weaponId;
   player = {
-    x: WORLD_W / 2, y: WORLD_H / 2, r: 5, hp: 60, level: 1, xp: 0,
-    stats: baseStats(), banked: 0,
+    x: WORLD_W / 2, y: WORLD_H / 2, r: 6, hp: 60, level: 1, xp: 0,
+    stats: baseStats(weaponId), banked: 0,
     facing: 1, moving: false, animT: 0,
     atkCd: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
-    axeCd: 0, flash: 0,
+    flash: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; axes = []; bolts = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; fx = []; texts = [];
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false;
   startWave(1);
@@ -245,6 +253,9 @@ const E_TYPES = {
   orc_warrior: { dirAnim: "cp_orc1", hp: 22, spd: 34, dmg: 9, xp: 2, r: 5, scale: 1, score: 2 },
   orc_blade: { dirAnim: "cp_orc3", hp: 15, spd: 62, dmg: 8, xp: 3, r: 5, scale: 1, score: 3 },
   orc_general: { dirAnim: "cp_orc2", hp: 70, spd: 28, dmg: 14, xp: 6, r: 6, scale: 1, score: 6 },
+  frost_orc: { dirAnim: "cp_frost", hp: 45, spd: 24, dmg: 12, xp: 4, r: 5, scale: 1, score: 4 },
+  night_orc: { dirAnim: "cp_night", hp: 16, spd: 74, dmg: 9, xp: 4, r: 5, scale: 1, score: 4 },
+  blood_general: { dirAnim: "cp_blood", hp: 120, spd: 32, dmg: 17, xp: 8, r: 6, scale: 1, score: 8 },
   masked_orc: { anim: "masked_orc", hp: 16, spd: 58, dmg: 7, xp: 2, r: 5, scale: 1, score: 2 },
   orc_shaman: { anim: "orc_shaman", hp: 14, spd: 30, dmg: 7, xp: 3, r: 5, scale: 1, ranged: true, score: 3 },
   orc_berserker: { anim: "orc_berserker", hp: 30, spd: 40, dmg: 11, xp: 4, r: 5, scale: 1, rage: true, score: 4 },
@@ -261,10 +272,13 @@ function waveComposition(w) {
   if (w >= 3) add("masked_orc", w - 2);
   if (w >= 4) add("orc_shaman", Math.floor(w / 2) + 1);
   if (w >= 5) add("orc_berserker", w - 3);
+  if (w >= 5) add("frost_orc", Math.floor(w / 2) - 1);
   if (w >= 6) add("orc_general", Math.floor(w / 3));
+  if (w >= 7) add("night_orc", w - 5);
+  if (w >= 9) add("blood_general", Math.floor(w / 4));
   if (w >= 5 && w % 5 === 0 && w !== FINAL_WAVE) add("ogre", Math.floor(w / 5));
-  if (w === FINAL_WAVE) { add("warchief", 1); add("ogre", 1); add("orc_general", 2); }
-  if (w > FINAL_WAVE) { add("ogre", Math.floor(w / 4)); add("orc_berserker", w - 4); add("orc_general", Math.floor(w / 3)); }
+  if (w === FINAL_WAVE) { add("warchief", 1); add("ogre", 1); add("blood_general", 2); }
+  if (w > FINAL_WAVE) { add("ogre", Math.floor(w / 4)); add("orc_berserker", w - 4); add("blood_general", Math.floor(w / 4)); add("night_orc", w - 6); }
   return list;
 }
 
@@ -313,18 +327,18 @@ function spawnEnemy(type) {
 
 // ------------------------------------------------------------------ cards --
 const CARD_POOL = [
-  { id: "dmg", name: "Sharpened Edge", desc: "+15% damage", icon: "weapon_waraxe", max: 9, apply: s => s.dmg *= 1.15 },
-  { id: "spd", name: "Battle Rage", desc: "+12% attack speed", icon: "slash_f1", max: 9, apply: s => s.atkSpd *= 1.12 },
-  { id: "mov", name: "Swift Boots", desc: "+10% move speed", icon: "flask_big_green", max: 6, apply: s => s.moveSpd *= 1.10 },
-  { id: "hp", name: "Orcish Vigor", desc: "+20% max HP, heal 20", icon: "flask_big_red", max: 9, apply: s => { s.maxHp = Math.round(s.maxHp * 1.2); player.hp = Math.min(s.maxHp, player.hp + 20); } },
-  { id: "reg", name: "Campfire Warmth", desc: "+1 HP/s regen", icon: "campfire_f0", max: 5, apply: s => s.regen += 1 },
-  { id: "axe", name: "Throwing Axe", desc: "+1 orbiting axe thrower", icon: "weapon_throwing_axe", max: 4, apply: s => s.axes += 1 },
-  { id: "crit", name: "Keen Eye", desc: "+10% crit chance (2x)", icon: "weapon_anime_sword", max: 6, apply: s => s.crit += 0.10 },
-  { id: "mag", name: "Greedy Hands", desc: "+45% pickup range", icon: "coin_f0", max: 5, apply: s => s.magnet *= 1.45 },
-  { id: "xp", name: "Trophy Hunter", desc: "+25% XP gained", icon: "xp_gem_f0", max: 5, apply: s => s.xpGain *= 1.25 },
-  { id: "rng", name: "Long Arms", desc: "+20% slash range", icon: "slash_f0", max: 4, apply: s => s.range *= 1.2 },
-  { id: "vamp", name: "Blood Pact", desc: "4% lifesteal", icon: "skull", max: 4, apply: s => s.lifesteal += 0.04 },
-  { id: "arm", name: "Iron Hide", desc: "-12% damage taken", icon: "crate", max: 5, apply: s => s.armor = 1 - (1 - s.armor) * 0.88 },
+  { id: "dmg", name: "Sharpened Edge", desc: "+10% damage", icon: "weapon_waraxe", max: 7, apply: s => s.dmg *= 1.10 },
+  { id: "spd", name: "Battle Rage", desc: "+8% attack speed", icon: "slash_f1", max: 7, apply: s => s.atkSpd *= 1.08 },
+  { id: "mov", name: "Swift Boots", desc: "+6% move speed", icon: "flask_big_green", max: 5, apply: s => s.moveSpd *= 1.06 },
+  { id: "hp", name: "Orcish Vigor", desc: "+12% max HP, heal 10", icon: "flask_big_red", max: 7, apply: s => { s.maxHp = Math.round(s.maxHp * 1.12); player.hp = Math.min(s.maxHp, player.hp + 10); } },
+  { id: "reg", name: "Campfire Warmth", desc: "+0.5 HP/s regen", icon: "campfire_f0", max: 5, apply: s => s.regen += 0.5 },
+  { id: "cry", name: "War Cry", desc: "+6% damage, +4% attack speed", icon: "weapon_throwing_axe", max: 5, apply: s => { s.dmg *= 1.06; s.atkSpd *= 1.04; } },
+  { id: "crit", name: "Keen Eye", desc: "+6% crit chance (2x)", icon: "weapon_anime_sword", max: 5, apply: s => s.crit += 0.06 },
+  { id: "mag", name: "Greedy Hands", desc: "+30% pickup range", icon: "coin_f0", max: 4, apply: s => s.magnet *= 1.30 },
+  { id: "xp", name: "Trophy Hunter", desc: "+15% XP gained", icon: "xp_gem_f0", max: 4, apply: s => s.xpGain *= 1.15 },
+  { id: "rng", name: "Long Arms", desc: "+10% slash range", icon: "slash_f0", max: 3, apply: s => s.range *= 1.10 },
+  { id: "vamp", name: "Blood Pact", desc: "2% lifesteal", icon: "skull", max: 4, apply: s => s.lifesteal += 0.02 },
+  { id: "arm", name: "Iron Hide", desc: "-8% damage taken", icon: "crate", max: 5, apply: s => s.armor = 1 - (1 - s.armor) * 0.92 },
 ];
 let cardCounts = {};
 
@@ -427,22 +441,13 @@ function playerMeleeAttack() {
     const ea = Math.atan2(e.y - player.y, e.x - player.x);
     let diff = Math.abs(ea - ang);
     if (diff > Math.PI) diff = Math.PI * 2 - diff;
-    if (diff < 1.15) {
+    if (diff < st.arc) {
       const crit = Math.random() < st.crit;
       damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
       // knockback
       e.x += Math.cos(ea) * 6; e.y += Math.sin(ea) * 6;
     }
   }
-}
-
-function throwAxe() {
-  const target = nearestEnemy(player, 180);
-  if (!target) return false;
-  const ang = Math.atan2(target.y - player.y, target.x - player.x);
-  axes.push({ x: player.x, y: player.y - 8, vx: Math.cos(ang) * 200, vy: Math.sin(ang) * 200, spin: 0, life: 1.1, hits: new Set() });
-  SFX.slash();
-  return true;
 }
 
 // ------------------------------------------------------------------ update --
@@ -479,10 +484,6 @@ function updatePlay(dt) {
   // -- attacks
   player.atkCd -= dt;
   if (player.atkCd <= 0) playerMeleeAttack();
-  if (st.axes > 0) {
-    player.axeCd -= dt;
-    if (player.axeCd <= 0 && throwAxe()) player.axeCd = 1.5 / (1 + (st.axes - 1) * 0.5) / Math.sqrt(st.atkSpd);
-  }
 
   // -- spawning
   spawnTimer += dt;
@@ -549,20 +550,6 @@ function updatePlay(dt) {
   }
 
   // -- projectiles
-  for (const a of [...axes]) {
-    a.x += a.vx * dt; a.y += a.vy * dt; a.spin += dt * 20; a.life -= dt;
-    for (const e of enemies) {
-      if (e.warmup > 0 || a.hits.has(e)) continue;
-      if (dist(a, e) < e.r + 6) {
-        a.hits.add(e);
-        const crit = Math.random() < st.crit;
-        damageEnemy(e, st.dmg * 0.8 * (crit ? 2 : 1), crit);
-        if (a.hits.size >= 2) a.life = 0;
-        break;
-      }
-    }
-    if (a.life <= 0) axes.splice(axes.indexOf(a), 1);
-  }
   for (const b of [...bolts]) {
     b.x += b.vx * dt; b.y += b.vy * dt; b.t += dt;
     if (b.t > 2.4) { bolts.splice(bolts.indexOf(b), 1); continue; }
@@ -689,12 +676,6 @@ function renderWorld() {
   for (const d of drawables) d.draw();
 
   // projectiles & fx above
-  for (const a of axes) {
-    ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.spin);
-    const im = IMG.weapon_throwing_axe;
-    ctx.drawImage(im, -im.width / 2, -im.height / 2);
-    ctx.restore();
-  }
   for (const b of bolts) drawSprite(animFrame(ANIM.bolt, b.t, 8), b.x, b.y + 3);
   for (const p of fx) {
     if (p.kind === "blood") {
@@ -726,21 +707,31 @@ function renderWorld() {
   renderDarkness(cx, cy);
 }
 
+const PLAYER_SCALE = 1.3;
 function drawPlayer() {
   const st = player.stats;
   const list = player.moving ? ANIM.hero_run : ANIM.hero_idle;
   if (player.flash > 0) { player.flash -= 1 / 60; ctx.filter = "brightness(2.5)"; }
   if (player.hurtCd > 0.3) ctx.globalAlpha = 0.6;
-  drawSprite(animFrame(list, player.animT), player.x, player.y + 4, player.facing < 0);
+  drawSprite(animFrame(list, player.animT), player.x, player.y + 5, player.facing < 0, PLAYER_SCALE);
   ctx.filter = "none"; ctx.globalAlpha = 1;
-  // held weapon
-  const im = IMG.weapon_anime_sword;
+  // held weapon(s)
+  const im = IMG[WEAPONS[G.weapon].sprite];
+  const swing = player.atkCd > 1 / st.atkSpd - 0.15 ? -1.2 : 0;
   ctx.save();
-  ctx.translate(Math.round(player.x + player.facing * 6), Math.round(player.y - 6));
-  ctx.rotate(player.facing * (0.5 + (player.atkCd > 1 / st.atkSpd - 0.15 ? -1.2 : 0)));
+  ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
+  ctx.rotate(player.facing * (0.5 + swing));
   ctx.scale(player.facing, 1);
   ctx.drawImage(im, -2, -im.height + 4);
   ctx.restore();
+  if (G.weapon === "knives") { // off-hand knife
+    ctx.save();
+    ctx.translate(Math.round(player.x - player.facing * 7), Math.round(player.y - 7));
+    ctx.rotate(-player.facing * (0.4 + swing * 0.5));
+    ctx.scale(-player.facing, 1);
+    ctx.drawImage(im, -2, -im.height + 4);
+    ctx.restore();
+  }
 }
 
 function drawEnemy(e) {
@@ -892,6 +883,44 @@ function wrapText(text, x, y, maxW, lh) {
   ctx.fillText(line, x, yy);
 }
 
+// weapon select --------------------------------------------------------------
+let selectRects = [];
+function renderSelect(t) {
+  ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
+  const g = ctx.createRadialGradient(VW / 2, 60, 8, VW / 2, 60, 140);
+  g.addColorStop(0, "rgba(252,150,50,0.15)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+  ctx.textAlign = "center";
+  ctx.font = "bold 14px monospace"; ctx.fillStyle = "#ffd166";
+  ctx.fillText("CHOOSE YOUR WEAPON", VW / 2, 36);
+  drawSprite(animFrame(ANIM.hero_idle, t, 6), VW / 2, 78, false, PLAYER_SCALE);
+
+  selectRects = [];
+  const ids = Object.keys(WEAPONS);
+  const cw = 120, chh = 130, gap = 40;
+  const total = ids.length * cw + (ids.length - 1) * gap;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i], w = WEAPONS[id];
+    const x = VW / 2 - total / 2 + i * (cw + gap), y = 96;
+    selectRects.push({ x, y, w: cw, h: chh, id });
+    ctx.drawImage(IMG.card, x, y, cw, chh);
+    const icon = IMG[w.sprite];
+    const s = 3;
+    ctx.drawImage(icon, Math.round(x + cw / 2 - icon.width * s / 2 - (id === "knives" ? 12 : 0)), y + 16, icon.width * s, icon.height * s);
+    if (id === "knives") ctx.drawImage(icon, Math.round(x + cw / 2 + 4), y + 16, icon.width * s, icon.height * s);
+    ctx.font = "bold 9px monospace"; ctx.fillStyle = "#3a2c18";
+    ctx.fillText(w.name, x + cw / 2, y + 82);
+    ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
+    wrapText(w.desc, x + cw / 2, y + 95, cw - 16, 9);
+    ctx.fillStyle = "#8a6a30";
+    ctx.fillText(`dmg ${w.dmg} · ${w.atkSpd}/s · reach ${w.range}`, x + cw / 2, y + 118);
+    ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
+    ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 12);
+  }
+  ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
+  ctx.fillText("click or press 1·2", VW / 2, VH - 12);
+}
+
 // title / end screens -------------------------------------------------------
 function renderTitle(t) {
   ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
@@ -909,10 +938,11 @@ function renderTitle(t) {
   // parade of orcs
   const parade = [
     ["goblin_idle", "goblin", 1], ["cp_orc1_idle_d", "grunt", 1], ["cp_orc3_idle_d", "blade", 1],
-    ["masked_orc_idle", "masked", 1], ["orc_shaman_idle", "shaman", 1], ["orc_berserker_idle", "berserker", 1],
-    ["cp_orc2_idle_d", "general", 1], ["ogre_idle", "ogre", 1], ["warchief_idle", "WARCHIEF", 1.6],
+    ["masked_orc_idle", "masked", 1], ["orc_shaman_idle", "shaman", 1], ["orc_berserker_idle", "berserk", 1],
+    ["cp_frost_idle_d", "frost", 1], ["cp_orc2_idle_d", "general", 1], ["cp_night_idle_d", "night", 1],
+    ["cp_blood_idle_d", "blood", 1], ["ogre_idle", "ogre", 1], ["warchief_idle", "WARCHIEF", 1.6],
   ];
-  const step = 46;
+  const step = 38;
   let x = VW / 2 - ((parade.length - 1) * step) / 2;
   for (let i = 0; i < parade.length; i++) {
     const [a, label, sc] = parade[i];
@@ -955,22 +985,31 @@ function renderEnd(victory, t) {
 
 // ------------------------------------------------------------- input glue --
 function handleKey(code) {
-  if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); newRun(); }
-  else if (G.state === "campfire") {
+  if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "select"; }
+  else if (G.state === "select") {
+    if (code === "Digit1") newRun("sword");
+    if (code === "Digit2") newRun("knives");
+  } else if (G.state === "campfire") {
     if (code === "Digit1") pickCard(0);
     if (code === "Digit2") pickCard(1);
     if (code === "Digit3") pickCard(2);
-  } else if (G.state === "gameover" && code === "Enter") { cardCounts = {}; newRun(); }
+  } else if (G.state === "gameover" && code === "Enter") { cardCounts = {}; G.state = "select"; }
   else if (G.state === "victory") {
     if (code === "KeyE") { G.endless = true; G.state = "play"; enterCampfire(); }
-    if (code === "Enter") { cardCounts = {}; newRun(); }
+    if (code === "Enter") { cardCounts = {}; G.state = "select"; }
   }
 }
 
 function handleClick(x, y) {
   audio();
-  if (G.state === "title") { newRun(); return true; }
-  if (G.state === "gameover") { cardCounts = {}; newRun(); return true; }
+  if (G.state === "title") { G.state = "select"; return true; }
+  if (G.state === "select") {
+    for (const r of selectRects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) { newRun(r.id); return true; }
+    }
+    return true;
+  }
+  if (G.state === "gameover") { cardCounts = {}; G.state = "select"; return true; }
   if (G.state === "victory") { G.endless = true; G.state = "play"; enterCampfire(); return true; }
   if (G.state === "campfire") {
     for (const r of cardRects) {
@@ -1006,6 +1045,7 @@ function frame(now) {
   }
 
   if (G.state === "title") renderTitle(now / 1000);
+  else if (G.state === "select") renderSelect(now / 1000);
   else if (G.state === "play") {
     updatePlay(dt);
     if (G.state === "play" || G.state === "gameover" || G.state === "victory") {

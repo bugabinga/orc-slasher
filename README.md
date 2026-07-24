@@ -22,6 +22,7 @@ between waves. Survive to wave 10 and slay the **Orc Warchief**.
 | WASD / arrows | move |
 | — | attack (auto-aims nearest orc) |
 | Space / Shift | dash (i-frames, 2s cooldown) |
+| 1·2 / click | choose starting weapon (knight sword or twin knives) |
 | 1·2·3 / click | pick upgrade card at the campfire |
 | touch drag | virtual joystick (mobile) |
 
@@ -35,12 +36,15 @@ between waves. Survive to wave 10 and slay the **Orc Warchief**.
 | Masked orc | quick skirmisher |
 | Orc shaman | keeps distance, lobs green bolts |
 | Orc berserker | enrages below 50% HP (custom recolor) |
+| Frost orc | slow, tanky bruiser (blue variant) |
 | Orc general | armored elite (CraftPix) |
+| Night stalker | very fast ambusher (purple variant) |
+| Blood general | heavy red-armor elite (late waves) |
 | Ogre | tanky miniboss every 5 waves |
 | **Orc Warchief** | wave-10 boss, summons goblins (original sprite) |
 
 Between waves you rest at a campfire and pick 1 card per level gained
-(damage, attack speed, throwing axes, lifesteal, crit, regen, …, 12 upgrades).
+(damage, attack speed, lifesteal, crit, regen, …, 12 upgrades).
 After the Warchief falls: endless mode.
 
 ## Project layout
