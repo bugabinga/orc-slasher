@@ -233,6 +233,8 @@ window.ASSETS = {
   "slash_f2": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAKCAYAAAC9vt6cAAAAQUlEQVR4nGNgoBdomrevAps4EzEa91x6cYIsG/dcenFiz6UXJ3DZTl2NyJpJ0ciCrJmBgYHBRU/CgiRb0Q0YegAABdwrme/luGYAAAAASUVORK5CYII=",
   "stalagmite_big": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAALCAYAAABLcGxfAAAAh0lEQVR4nIWPywmAMBBER7GCICEs1pCDNXiw/xokyCC2EA+y8bfBuSTsZuZNAEPBSQ5OsrVrrcfzNGGMEZbpYwAAkuC2WSt0VjpJ+L7XcV731FQJJM+zQigGTVcpYRB5/OVR6S+9EIKTPMb4Sb9LKaWS9/4ivQiDSLk37/SaCQCWlE5DtbChA6+OMtw+zB9EAAAAAElFTkSuQmCC",
   "stalagmite_small": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAHCAYAAAA1WQxeAAAAVklEQVR4nGNgQAISQlL/JYSk/iOLMSFLeri4MBjp6TEgK2JCVv3q1SuGV2/eIAtBFEgISf030tODC8pIScFNgZsgJibGgA0woutGtuLJs2cQBVi1QgEALTgYIS+0V5oAAAAASUVORK5CYII=",
+  "torch_f0": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAJCAYAAAAPU20uAAAAaUlEQVR4nGNgQALvmhT+/7mU8B9ZjAlZki/AAc7GUAADzCoZ6EII8OdSAoYVjDCGhJDU/zArEQYGBgaGVcfeMLx494wRbkVUGELXnRdfGJDFMEy48+ILw7l7P1BNIBpICEn9lxCSQnEkABAkLMi8zmQ7AAAAAElFTkSuQmCC",
+  "torch_f1": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAJCAYAAAAPU20uAAAAe0lEQVR4nGNggIJ3TQr/GRgYGP5cSvjPgASYkDkwSZhiOHjXpPD/z6WE//+/nfj//9uJ/38uJfzHUAQzAd0KRhhDQkjqf5iVCAMDAwPDqmNvGF68e8YId0NUGELXnRdfGJDFMEy48+ILw7l7P1BNIBpICEn9lxCSQnEkAHd/Pye+KPumAAAAAElFTkSuQmCC",
   "ui_key": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAHCAYAAAA8sqwkAAAAcElEQVR4nGNkYGBgkBCS+s+ABF68e8bIgAOwSAhJ/T+1SAVF0CyO4T8uTSwwhpzPIUYGBgaGR1vs/mOzFUMDMkC3EWHzHQYmGOfRFrv/MNPN4u4wmMXdgStCphlg1iNjZPEVDTr/YTRWa9EBzAAYDQBxHy2a4Wa5RgAAAABJRU5ErkJggg==",
   "weapon_blast_dagger": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAkAAAAKCAYAAABmBXS+AAAASElEQVR4nGNgQAMSQlL/0cUwFBy58OA/ukImbIrTSupQTMSqCB2QpgjZ+Fk9Tbh1SAhJ/fcyUSLs8KyIu4TdtGvXfsKOxBaYAADPFgkscQhgAAAAAElFTkSuQmCC",
   "weapon_molotov": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAALCAYAAABCm8wlAAAAcklEQVR4nGNgQALvmhT+/7mU8B9ZjIkBDXzacIABqwIJIan/H0KWwNk4TdCa8IvhxbtnjFgVNGxZdVIrzOIuXhPQARPMTreKkJMMDAwMMkoyb5BNYUFWXcCyw5yBgYGhhEHnLmlW4ANw7yC7nIGBAe5VAANxJK7mHeXhAAAAAElFTkSuQmCC",
@@ -924,6 +926,7 @@ const ANIM = {
   shamanking_run: ["orc_shamanking_run_f0", "orc_shamanking_run_f1", "orc_shamanking_run_f2", "orc_shamanking_run_f3"],
   campfire: ["campfire_f0", "campfire_f1", "campfire_f2", "campfire_f3"],
   mushroom: ["mushroom_glow_f0", "mushroom_glow_f1"],
+  torch: ["torch_f0", "torch_f1"],
   king: ["hanging_king_f0", "hanging_king_f1"],
   gem: ["xp_gem_f0", "xp_gem_f1"],
   coin: ["coin_f0", "coin_f1", "coin_f2", "coin_f3"],
@@ -1109,7 +1112,7 @@ function animFrame(list, t, fps = 8) {
 let floorCanvas = null;
 let solids = []; // {x,y,w,h} world-space rects
 
-let mushrooms = [], kingPos = null;
+let mushrooms = [], torches = [], kingPos = null;
 
 function buildMap() {
   solids = [];
@@ -1207,6 +1210,19 @@ function buildMap() {
   for (let i = 0; i < 7; i++) { // glowing mushrooms are drawn live (they flicker)
     const t = freeTile();
     if (t) mushrooms.push({ x: t.tx * TILE + 8, y: t.ty * TILE + 12, t: rnd(0, 9) });
+  }
+  // torches mounted on south-facing rock rims
+  torches = [];
+  const rims = [];
+  for (let ty = 1; ty < MAP_H - 1; ty++) {
+    for (let tx = 2; tx < MAP_W - 2; tx++) {
+      if (rock[ty][tx] && !rock[ty + 1][tx]) rims.push({ tx, ty });
+    }
+  }
+  for (let i = 0; i < 10 && rims.length; i++) {
+    const r = rims.splice(irnd(0, rims.length - 1), 1)[0];
+    if (torches.some(t => Math.abs(t.x - r.tx * TILE) < TILE * 4 && Math.abs(t.y - r.ty * TILE) < TILE * 3)) continue;
+    torches.push({ x: r.tx * TILE + 8, y: r.ty * TILE + 15, t: rnd(0, 9) });
   }
 }
 
@@ -1510,6 +1526,7 @@ function spawnEnemy(type) {
     score: t.score,
     atkCd: rnd(0, 1), animT: rnd(0, 9), facing: 1, hitFlash: 0, warmup: 0.8,
     summonCd: 6, strafe: rnd(0, Math.PI * 2), chargeCd: 4, chargeT: 0,
+    avoidT: 0, avoidDir: 1,
   });
   fx.push({ kind: "spawn", x: p.x, y: p.y, life: 0.8, max: 0.8 });
 }
@@ -2067,11 +2084,24 @@ function updatePlay(dt) {
       }
     }
     const tl = Math.hypot(tx, ty) || 1;
-    e.x += (tx / tl) * sp * dt; e.y += (ty / tl) * sp * dt;
+    let dirX = tx / tl, dirY = ty / tl;
+    if (e.avoidT > 0) { // steering around a rock: blend toward the tangent
+      e.avoidT -= dt;
+      let ax = -dirY * e.avoidDir + dirX * 0.4, ay = dirX * e.avoidDir + dirY * 0.4;
+      const al = Math.hypot(ax, ay) || 1;
+      dirX = ax / al; dirY = ay / al;
+    }
+    const preX = e.x, preY = e.y;
+    e.x += dirX * sp * dt; e.y += dirY * sp * dt;
     e.facing = player.x >= e.x ? 1 : -1;
     if (e.dirAnim) e.dir = Math.abs(tx) > Math.abs(ty) ? (tx > 0 ? "r" : "l") : (ty > 0 ? "d" : "u");
     const ec = collideSolids(e.x, e.y, e.r);
     e.x = ec.x; e.y = ec.y;
+    // barely moved while trying to -> pick a side and slide around the obstacle
+    if (sp > 0 && Math.hypot(e.x - preX, e.y - preY) < sp * dt * 0.35 && e.avoidT <= 0) {
+      e.avoidT = rnd(0.45, 0.9);
+      e.avoidDir = Math.random() < 0.5 ? 1 : -1;
+    }
     // contact damage
     e.atkTouch = Math.max(0, (e.atkTouch || 0) - dt);
     if (!e.ranged && dToP < e.r + player.r + 3 && e.atkTouch === 0) {
@@ -2253,8 +2283,9 @@ function renderWorld() {
   ctx.translate(-Math.round(cx), -Math.round(cy));
   ctx.drawImage(floorCanvas, 0, 0);
 
-  // glowing mushrooms (flickering, so drawn live)
+  // glowing mushrooms + torches (flickering, so drawn live)
   for (const m of mushrooms) drawSprite(animFrame(ANIM.mushroom, G.t + m.t, 3), m.x, m.y);
+  for (const t of torches) drawSprite(animFrame(ANIM.torch, G.t + t.t, 6), t.x, t.y);
   // the hanged king on the east wall
   if (kingPos) {
     ctx.fillStyle = "rgba(110,20,26,0.75)"; // blood pool
@@ -2535,6 +2566,7 @@ function renderDarkness(cx, cy) {
   for (const m of missiles) punch(m.x, m.y, 14, 0.6);
   for (const d of daggers) punch(d.x, d.y, 16, 0.6);
   for (const m of mushrooms) punch(m.x, m.y - 3, 22, 0.55);
+  for (const t of torches) punch(t.x, t.y - 6, 46 + Math.sin(G.t * 9 + t.t) * 4, 0.8);
   if (kingPos) punch(kingPos.x, kingPos.y - 12, 36, 0.5);
   for (const b of beams) {
     for (let i = 0; i < 4; i++) {

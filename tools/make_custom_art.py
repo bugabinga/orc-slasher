@@ -974,6 +974,38 @@ KCWCCccK
 ...KK...
 """, MUSH_PAL)
 
+TORCH_PAL = {
+    "K": (24, 18, 26, 255),
+    "W": (110, 76, 46, 255),   # wood
+    "w": (74, 52, 34, 255),
+    "R": (238, 130, 32, 255),  # flame
+    "Y": (252, 210, 96, 255),
+    "C": (255, 246, 200, 255), # core
+    "S": (90, 86, 96, 255),    # iron bracket
+}
+save_grid("torch_f0", """
+...RY...
+..RYYR..
+..RYCR..
+...YY...
+..KWWK..
+.SKWwKS.
+..KWwK..
+..KWwK..
+...KK...
+""", TORCH_PAL)
+save_grid("torch_f1", """
+..R.Y...
+..RYYR..
+.RYCCYR.
+...YY...
+..KWWK..
+.SKWwKS.
+..KWwK..
+..KWwK..
+...KK...
+""", TORCH_PAL)
+
 BONE_PAL = {
     "K": (30, 26, 32, 255),
     "W": (216, 208, 190, 255),
