@@ -33,7 +33,7 @@ offline, on desktop and phone.
 | ✝ Nun | regenerates, +20% XP, hits softer | buy 300g · or 0.1% boss relic |
 | 🗡 Assassin | +15% crit, +10% speed, 50 HP, katana & shuriken | buy 400g |
 | 💀 Reaper | +10% damage, lifesteal, very frail | buy 600g · or reach wave 10 |
-| 🔮 Mage | 3 fire spells you cast by clicking — auto-aimed, long cooldowns | buy 900g |
+| 🔮 Mage | auto magic missile + 3 click-cast fire spells, auto-aimed | buy 900g |
 
 Each hero brings their own arsenal — the Knight his sword, spear and bow;
 the Barbarian knives, spear and war axe; the Nun whip and bow; Quasimodo

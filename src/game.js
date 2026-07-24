@@ -309,7 +309,7 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, missiles, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
@@ -324,7 +324,7 @@ const WEAPONS = {
   shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 5, atkSpd: 2.6, range: 25, arc: 1.2 },
   katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
   shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 5, atkSpd: 2.8, range: 125, arc: 0, star: true },
-  spells: { name: "Arcane Arts", desc: "fireball · shockwave · firebeam", sprite: "weapon_red_magic_staff", dmg: 10, atkSpd: 1, range: 165, arc: 0, spells: true },
+  spells: { name: "Arcane Arts", desc: "magic missile + fireball · shockwave · firebeam", sprite: "weapon_red_magic_staff", dmg: 10, atkSpd: 1, range: 165, arc: 0, spells: true },
 };
 
 const SPELLS = {
@@ -350,7 +350,7 @@ const CLASSES = {
   reaper: { name: "Reaper", anim: "reaper", desc: "+10% dmg, 2% lifesteal, frail", unlock: "reaper", price: 600,
     weapons: ["scythe", "knives"],
     mods: s => { s.dmg *= 1.10; s.lifesteal += 0.02; s.maxHp = 45; s.moveSpd *= 1.05; } },
-  mage: { name: "Mage", anim: "mage", desc: "3 spells: click casts, auto-aim", unlock: "mage", price: 900,
+  mage: { name: "Mage", anim: "mage", desc: "auto missile + 3 click-cast spells", unlock: "mage", price: 900,
     weapons: ["spells"],
     mods: s => { s.maxHp = 50; } },
   monk: { name: "Monk", anim: "monk", desc: "dev tester — masters every weapon", devOnly: true,
@@ -469,7 +469,7 @@ function newRun(weaponId) {
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; missiles = []; fx = []; texts = [];
   player.spellCd = { fire: 0, shock: 0, beam: 0 };
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
@@ -832,6 +832,19 @@ function playerStarAttack() {
   SFX.slash();
 }
 
+// the mage's normal attack: a small auto-fired magic missile, always ready
+function playerMissileAttack() {
+  const st = player.stats;
+  const target = nearestEnemy(player, 140);
+  if (!target) return;
+  player.atkCd = 1 / (1.7 * st.atkSpd);
+  const ang = Math.atan2(target.y - player.y, target.x - player.x);
+  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
+  player.atkAng = ang;
+  missiles.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 240, vy: Math.sin(ang) * 240, life: 0.7, t: rnd(0, 9) });
+  beep(700, 0.05, "sine", 0.04, 200);
+}
+
 // mage spells — manual cast (click/tap or 1/2/3), auto-aimed, long cooldowns
 function castSpell(id) {
   if (!player || player.spellCd[id] > 0) return false;
@@ -953,7 +966,22 @@ function updatePlay(dt) {
     if (player.atkCd <= 0) playerStarAttack();
   } else if (WEAPONS[G.weapon].spells) {
     for (const id of Object.keys(player.spellCd)) player.spellCd[id] = Math.max(0, player.spellCd[id] - dt);
+    if (player.atkCd <= 0) playerMissileAttack();
   } else if (player.atkCd <= 0) playerMeleeAttack();
+
+  for (const m of [...missiles]) {
+    m.x += m.vx * dt; m.y += m.vy * dt; m.life -= dt; m.t += dt;
+    for (const e of enemies) {
+      if (e.warmup > 0) continue;
+      if (dist(m, { x: e.x, y: e.y - 4 }) < e.r + 4) {
+        const crit = Math.random() < st.crit;
+        damageEnemy(e, st.dmg * 0.9 * (crit ? 2 : 1) * rnd(0.9, 1.1), crit); // 9 dmg at base
+        m.life = 0;
+        break;
+      }
+    }
+    if (m.life <= 0) missiles.splice(missiles.indexOf(m), 1);
+  }
 
   // -- mage projectiles & beams
   for (const f of [...fireballs]) {
@@ -1275,6 +1303,18 @@ function renderWorld() {
     ctx.drawImage(im, -im.width / 2, -im.height / 2);
     ctx.restore();
   }
+  for (const m of missiles) {
+    const wob = Math.sin(m.t * 26) * 1.5;
+    const px2 = -m.vy, py2 = m.vx;
+    const pl = Math.hypot(px2, py2) || 1;
+    const mx = m.x + (px2 / pl) * wob, my = m.y + (py2 / pl) * wob;
+    ctx.fillStyle = "rgba(150,110,255,0.45)";
+    ctx.fillRect(Math.round(mx - m.vx * 0.02) - 1, Math.round(my - m.vy * 0.02) - 1, 2, 2);
+    ctx.fillStyle = "#b48cff";
+    ctx.fillRect(Math.round(mx) - 1, Math.round(my) - 1, 3, 3);
+    ctx.fillStyle = "#efe6ff";
+    ctx.fillRect(Math.round(mx), Math.round(my), 1, 1);
+  }
   for (const f of fireballs) {
     const g3 = ctx.createRadialGradient(f.x, f.y, 1, f.x, f.y, 10);
     g3.addColorStop(0, "rgba(255,240,180,0.95)");
@@ -1457,6 +1497,7 @@ function renderDarkness(cx, cy) {
   for (const f of firePatches) punch(f.x, f.y, 55, 0.85 * clamp(f.life / f.max + 0.3, 0, 1));
   for (const m of molotovs) punch(m.x, m.y, 18, 0.7);
   for (const f of fireballs) punch(f.x, f.y, 30, 0.8);
+  for (const m of missiles) punch(m.x, m.y, 14, 0.6);
   for (const b of beams) {
     for (let i = 0; i < 4; i++) {
       punch(player.x + Math.cos(b.ang) * (20 + i * 38), player.y - 6 + Math.sin(b.ang) * (20 + i * 38), 26, 0.6);
