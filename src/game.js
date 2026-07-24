@@ -539,11 +539,30 @@ function newRun(weaponId) {
   player.spellCd = { fire: 0, shock: 0, beam: 0 };
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
+  G.sayQ = []; G.kingSeen = false; G.saidLowHp = false;
+  say("They dragged the King into this cave…", 1.2);
+  say("I will find him. I swear it.", 4.2);
   startWave(1);
   G.state = "play";
 }
 
 function xpNeeded(level) { return 4 + level * 4; }
+
+// story: the hero speaks — lines queue up and follow the player
+function say(s, delay = 0) {
+  G.sayQ.push({ s, at: G.t + delay });
+  G.sayQ.sort((a, b) => a.at - b.at);
+}
+
+function bossLine(type) {
+  if (type === "orc_butcher") {
+    return G.kingSeen ? "The Butcher dies for what they did!" : "Oh no… I must survive — for the King!";
+  }
+  if (type === "warchief") {
+    return G.kingSeen ? "Warchief! You hanged my King!" : "The Warchief himself… hold on, for the King!";
+  }
+  return "A false king of shamans… mine was worth ten of you.";
+}
 
 // ------------------------------------------------------------------ waves --
 const E_TYPES = {
@@ -596,7 +615,7 @@ function startWave(w) {
   spawnTimer = 0;
   const bossWave = w % 5 === 0;
   texts.push({ x: player.x, y: player.y - 40, s: bossWave ? `${BOSS_NAMES[bossFor(w)]} COMES` : "WAVE " + w, life: 2.2, col: bossWave ? "#ff6b6b" : "#ffd166", big: true });
-  if (bossWave) SFX.bossRoar();
+  if (bossWave) { SFX.bossRoar(); say(bossLine(bossFor(w)), 1.4); }
   if (w >= 10 && (!UN.scythe || !UN.reaper)) {
     UN.scythe = true; UN.reaper = true; saveUnlocks();
     texts.push({ x: player.x, y: player.y - 56, s: "SCYTHE & REAPER UNLOCKED!", life: 3, col: "#b48cff", big: true });
@@ -1296,9 +1315,16 @@ function updatePlay(dt) {
     }
     if (!G.kingSeen && dist(player, kingPos) < 70) {
       G.kingSeen = true;
-      texts.push({ x: kingPos.x - 90, y: kingPos.y - 40, s: "THE KING… WE CAME TOO LATE", life: 3.5, col: "#c9c0da", big: true });
       beep(110, 0.5, "sine", 0.06, -40);
+      say("No… my King… I came too late.");
+      say("…then this cave becomes their grave.", 3.4);
     }
+  }
+
+  // hero speech queue — only one line on screen at a time
+  while (G.sayQ.length && G.t >= G.sayQ[0].at) {
+    for (let i = texts.length - 1; i >= 0; i--) if (texts[i].speech) texts.splice(i, 1);
+    texts.push({ x: player.x, y: player.y - 30, s: G.sayQ.shift().s, life: 3, col: "#a8d4ff", speech: true });
   }
 
   // -- fx / texts
@@ -1309,7 +1335,9 @@ function updatePlay(dt) {
     if (p.life <= 0) fx.splice(fx.indexOf(p), 1);
   }
   for (const t of [...texts]) {
-    t.life -= dt; t.y -= 14 * dt;
+    t.life -= dt;
+    if (t.speech) { t.x = player.x; t.y = player.y - 30; } // speech follows the hero
+    else t.y -= 14 * dt;
     if (t.life <= 0) texts.splice(texts.indexOf(t), 1);
   }
 
@@ -1336,6 +1364,10 @@ function hurtPlayer(dmg) {
   if (player.hurtCd > 0 || player.dashT > 0) return;
   const taken = dmg * (1 - player.stats.armor);
   player.hp -= taken;
+  if (!G.saidLowHp && player.hp > 0 && player.hp < player.stats.maxHp * 0.25) {
+    G.saidLowHp = true;
+    say("Not yet… I must survive… for the King!", 0.3);
+  }
   player.hurtCd = 0.5;
   player.flash = 0.15;
   G.shake = 6;
@@ -1531,14 +1563,15 @@ function renderWorld() {
     }
   }
 
-  // damage numbers
+  // damage numbers + hero speech
   ctx.textAlign = "center";
   for (const t of texts) {
-    ctx.font = t.big ? "bold 11px monospace" : "bold 8px monospace";
+    const s = t.speech ? `“${t.s}”` : t.s;
+    ctx.font = t.big ? "bold 11px monospace" : (t.speech ? "italic bold 8px monospace" : "bold 8px monospace");
     ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillText(t.s, Math.round(t.x) + 1, Math.round(t.y) + 1);
+    ctx.fillText(s, Math.round(t.x) + 1, Math.round(t.y) + 1);
     ctx.fillStyle = t.col;
-    ctx.fillText(t.s, Math.round(t.x), Math.round(t.y));
+    ctx.fillText(s, Math.round(t.x), Math.round(t.y));
   }
   ctx.restore();
 
@@ -2470,11 +2503,15 @@ function renderEnd(victory, t) {
   if (victory) {
     drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], t, 6), VW / 2 - 12, 150);
     drawSprite(animFrame(ANIM.campfire, t, 8), VW / 2 + 12, 150);
+    ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff";
+    ctx.fillText("“It is done. Rest now, my King.”", VW / 2, 132);
     ctx.font = "8px monospace"; ctx.fillStyle = "#ffd166";
     ctx.fillText("the cave is quiet. the fire is warm.", VW / 2, 168);
     ctx.fillText("[E] keep slaying (endless)   [ENTER] new run", VW / 2, 196);
   } else {
     drawSprite("skull", VW / 2, 152, false, 2);
+    ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff";
+    ctx.fillText("“Forgive me, my King…”", VW / 2, 174);
     ctx.font = "8px monospace"; ctx.fillStyle = "#ffd166";
     ctx.fillText("[ENTER] try again", VW / 2, 196);
   }
