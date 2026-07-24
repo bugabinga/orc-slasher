@@ -38,6 +38,10 @@ const ANIM = {
   reaper_run: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
   assassin_idle: ["assassin_idle_f0", "assassin_idle_f1", "assassin_idle_f2", "assassin_idle_f3"],
   assassin_run: ["assassin_run_f0", "assassin_run_f1", "assassin_run_f2", "assassin_run_f3"],
+  monk_idle: ["monk_idle_f0", "monk_idle_f1", "monk_idle_f2", "monk_idle_f3"],
+  monk_run: ["monk_run_f0", "monk_run_f1", "monk_run_f2", "monk_run_f3"],
+  orc_grunt_idle: ["orc_grunt_idle_f0", "orc_grunt_idle_f1", "orc_grunt_idle_f2", "orc_grunt_idle_f3"],
+  orc_grunt_run: ["orc_grunt_run_f0", "orc_grunt_run_f1", "orc_grunt_run_f2", "orc_grunt_run_f3"],
   goblin_idle: ["goblin_idle_f0", "goblin_idle_f1", "goblin_idle_f2", "goblin_idle_f3"],
   goblin_run: ["goblin_run_f0", "goblin_run_f1", "goblin_run_f2", "goblin_run_f3"],
   orc_warrior_idle: ["orc_warrior_idle_f0", "orc_warrior_idle_f1", "orc_warrior_idle_f2", "orc_warrior_idle_f3"],
@@ -303,7 +307,7 @@ const WEAPONS = {
   whip: { name: "Whip", desc: "long lash, narrow snap", sprite: "weapon_whip", dmg: 7, atkSpd: 1.6, range: 62, arc: 0.55 },
   axe: { name: "War Axe", desc: "heavy chop, wide arc", sprite: "weapon_waraxe", dmg: 14, atkSpd: 0.9, range: 35, arc: 1.5 },
   spear: { name: "Spear", desc: "long thrust, pierces a line", sprite: "weapon_spear", dmg: 10, atkSpd: 1.25, range: 58, arc: 0.45 },
-  scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 17, atkSpd: 0.8, range: 46, arc: 2.4, unlock: "scythe" },
+  scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 16, atkSpd: 0.8, range: 46, arc: 2.4, unlock: "scythe" },
   molotov: { name: "Molotov", desc: "lobbed firebomb, burns the ground", sprite: "weapon_molotov", dmg: 14, atkSpd: 0.7, range: 135, arc: 0, thrown: true },
   shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 5, atkSpd: 2.6, range: 25, arc: 1.2 },
   katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
@@ -324,9 +328,12 @@ const CLASSES = {
   assassin: { name: "Assassin", anim: "assassin", desc: "+15% crit, +10% speed, 50 HP", unlock: "assassin", price: 400,
     weapons: ["katana", "shuriken"],
     mods: s => { s.crit += 0.15; s.moveSpd *= 1.10; s.maxHp = 50; } },
-  reaper: { name: "Reaper", anim: "reaper", desc: "+20% dmg, 3% lifesteal, frail", unlock: "reaper", price: 600,
+  reaper: { name: "Reaper", anim: "reaper", desc: "+10% dmg, 2% lifesteal, frail", unlock: "reaper", price: 600,
     weapons: ["scythe", "knives"],
-    mods: s => { s.dmg *= 1.20; s.lifesteal += 0.03; s.maxHp = 45; s.moveSpd *= 1.05; } },
+    mods: s => { s.dmg *= 1.10; s.lifesteal += 0.02; s.maxHp = 45; s.moveSpd *= 1.05; } },
+  monk: { name: "Monk", anim: "monk", desc: "dev tester — masters every weapon", devOnly: true,
+    weapons: Object.keys(WEAPONS),
+    mods: s => { s.maxHp = 65; } },
 };
 CLASSES.barbar.price = 300;
 CLASSES.nun.price = 300;
@@ -444,7 +451,7 @@ function xpNeeded(level) { return 4 + level * 4; }
 // ------------------------------------------------------------------ waves --
 const E_TYPES = {
   goblin: { anim: "goblin", hp: 9, spd: 55, dmg: 5, xp: 1, r: 4, scale: 1, score: 1 },
-  orc_warrior: { dirAnim: "cp_orc1", hp: 22, spd: 34, dmg: 9, xp: 2, r: 5, scale: 1, score: 2 },
+  orc_warrior: { anim: "orc_grunt", hp: 22, spd: 34, dmg: 9, xp: 2, r: 5, scale: 1, score: 2 },
   orc_blade: { dirAnim: "cp_orc3", hp: 15, spd: 62, dmg: 8, xp: 3, r: 5, scale: 1, score: 3 },
   orc_general: { dirAnim: "cp_orc2", hp: 70, spd: 28, dmg: 14, xp: 6, r: 6, scale: 1, score: 6 },
   frost_orc: { dirAnim: "cp_frost", hp: 45, spd: 24, dmg: 12, xp: 4, r: 5, scale: 1, score: 4 },
@@ -1307,6 +1314,10 @@ function renderHUD() {
   ctx.fillRect(pauseBtnRect.x + 6, pauseBtnRect.y + 5, 3, 8);
   ctx.fillRect(pauseBtnRect.x + 11, pauseBtnRect.y + 5, 3, 8);
 
+  // monk weapon inventory (dev mode only)
+  if (DEV.on && G.cls === "monk") renderInventoryBar();
+  else invRects = [];
+
   // touch dash button
   if (usingTouch) {
     const ready = player.dashCd <= 0;
@@ -1328,7 +1339,48 @@ function renderHUD() {
   }
 }
 
-let pauseBtnRect = null, fsPauseRect = null;
+let pauseBtnRect = null, fsPauseRect = null, invRects = [];
+
+// monk-only (dev mode): switch to any weapon mid-run, stats rebuilt from
+// scratch (base weapon -> class mods -> owned cards re-applied)
+function monkSwitchWeapon(id) {
+  if (G.weapon === id) return;
+  G.weapon = id;
+  const stats = baseStats(id);
+  CLASSES[G.cls].mods(stats);
+  for (const c of CARD_POOL) {
+    for (let i = 0; i < (cardCounts[c.id] || 0); i++) c.apply(stats);
+  }
+  const hpFrac = player.hp / player.stats.maxHp;
+  player.stats = stats;
+  player.hp = clamp(hpFrac * stats.maxHp, 1, stats.maxHp);
+  player.atkCd = 0; player.reloadT = 0; player.ammo = WEAPONS[id].clip || 0;
+  SFX.card();
+}
+
+function renderInventoryBar() {
+  invRects = [];
+  const ids = Object.keys(WEAPONS);
+  const slot = 21, gap = 1;
+  const total = ids.length * slot + (ids.length - 1) * gap;
+  const x0 = VW / 2 - total / 2, y = VH - 26;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i], x = x0 + i * (slot + gap);
+    invRects.push({ x, y, w: slot, h: slot, id });
+    const cur = id === G.weapon;
+    ctx.fillStyle = cur ? "rgba(255,209,102,0.22)" : "rgba(24,19,34,0.85)";
+    ctx.fillRect(x, y, slot, slot);
+    ctx.strokeStyle = cur ? "#ffd166" : "#3a3346"; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, slot - 1, slot - 1);
+    const im = IMG[WEAPONS[id].sprite];
+    if (im && im.complete) {
+      const s = Math.min(1.1, (slot - 6) / im.height, (slot - 6) / im.width);
+      ctx.drawImage(im, Math.round(x + slot / 2 - im.width * s / 2), Math.round(y + slot / 2 - im.height * s / 2), Math.round(im.width * s), Math.round(im.height * s));
+    }
+  }
+  ctx.font = "6px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#8f84a8";
+  ctx.fillText(`MONK ARSENAL — ${WEAPONS[G.weapon].name} · tap a slot or Q/E to cycle`, VW / 2, y - 4);
+}
 function renderPauseOverlay(t) {
   ctx.fillStyle = "rgba(7,5,16,0.7)"; ctx.fillRect(0, 0, VW, VH);
   ctx.textAlign = "center";
@@ -1657,6 +1709,13 @@ function renderPassModal(dt) {
 // class select + class shop ---------------------------------------------------
 let clsRects = [], clsToast = null;
 
+function selectClass(id) {
+  G.cls = id;
+  // the monk swaps weapons in-game via his inventory bar — no select screen
+  if (id === "monk") newRun("sword");
+  else G.state = "select";
+}
+
 function tryBuyClass(id) {
   const c = CLASSES[id];
   if (!c.price) return;
@@ -1698,8 +1757,10 @@ function renderClassSelect(t) {
   ctx.textAlign = "center";
 
   clsRects = [];
-  const ids = Object.keys(CLASSES);
-  const cw = 76, chh = 142, gap = 3;
+  const ids = Object.keys(CLASSES).filter(id => !CLASSES[id].devOnly || DEV.on);
+  const gap = 3;
+  const cw = Math.min(76, Math.floor((VW - 16 - (ids.length - 1) * gap) / ids.length));
+  const chh = 142;
   const total = ids.length * cw + (ids.length - 1) * gap;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], c = CLASSES[id];
@@ -1854,7 +1915,7 @@ function renderTitle(t) {
 
   // endless orc horde marching left toward him
   const MARCH = [
-    ["goblin_run", true, 1], ["cp_orc1_run_l", false, 1], ["orc_shaman_run", true, 1],
+    ["goblin_run", true, 1], ["orc_grunt_run", true, 1], ["orc_shaman_run", true, 1],
     ["cp_orc3_run_l", false, 1], ["orc_berserker_run", true, 1], ["cp_frost_run_l", false, 1],
     ["masked_orc_run", true, 1], ["cp_orc2_run_l", false, 1], ["cp_night_run_l", false, 1],
     ["ogre_run", true, 1], ["butcher_run", true, 1.3], ["cp_blood_run_l", false, 1],
@@ -1914,13 +1975,13 @@ function handleKey(code) {
   else if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "cls"; }
   else if (G.state === "credits") { G.state = "title"; }
   else if (G.state === "cls") {
-    const ids = Object.keys(CLASSES);
+    const ids = Object.keys(CLASSES).filter(id => !CLASSES[id].devOnly || DEV.on);
     if (code === "KeyF") { toggleFullscreen(); return; }
     const m = /^Digit([1-9])$/.exec(code);
     if (m) {
       const id = ids[+m[1] - 1];
       if (!id) return;
-      if (isUnlocked(CLASSES[id].unlock)) { G.cls = id; G.state = "select"; }
+      if (isUnlocked(CLASSES[id].unlock)) selectClass(id);
       else tryBuyClass(id);
     }
   } else if (G.state === "select") {
@@ -1945,6 +2006,11 @@ function handleKey(code) {
   } else if (G.state === "play") {
     if (code === "KeyP" || code === "Escape") G.paused = !G.paused;
     if (code === "KeyF" && G.paused) toggleFullscreen();
+    if (DEV.on && G.cls === "monk" && (code === "KeyQ" || code === "KeyE")) {
+      const ids = Object.keys(WEAPONS);
+      const i = ids.indexOf(G.weapon);
+      monkSwitchWeapon(ids[(i + (code === "KeyE" ? 1 : ids.length - 1)) % ids.length]);
+    }
   }
 }
 
@@ -1997,7 +2063,7 @@ function handleClick(x, y) {
   if (G.state === "cls") {
     for (const r of clsRects) {
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
-        if (r.unlocked) { G.cls = r.id; G.state = "select"; }
+        if (r.unlocked) selectClass(r.id);
         else tryBuyClass(r.id);
         return true;
       }
@@ -2017,6 +2083,12 @@ function handleClick(x, y) {
         y >= pauseBtnRect.y - 3 && y <= pauseBtnRect.y + pauseBtnRect.h + 3) {
       G.paused = !G.paused;
       return true;
+    }
+    for (const r of invRects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y - 2 && y <= r.y + r.h + 2) {
+        monkSwitchWeapon(r.id);
+        return true;
+      }
     }
     if (G.paused) {
       if (fsPauseRect && x >= fsPauseRect.x && x <= fsPauseRect.x + fsPauseRect.w &&
@@ -2092,11 +2164,12 @@ function frame(now) {
     else renderPassModal(dt);
   }
 
-  // dev mode badge
+  // dev mode badge (kept clear of the monk's arsenal bar)
   if (DEV.on) {
     ctx.font = "bold 7px monospace"; ctx.textAlign = "left";
     ctx.fillStyle = "#b48cff";
-    ctx.fillText("DEV MODE — all classes & weapons (retype phrase on a menu to exit)", 6, VH - 4);
+    const inPlayAsMonk = G.state === "play" && G.cls === "monk";
+    ctx.fillText(inPlayAsMonk ? "DEV" : "DEV MODE — all classes & weapons (retype phrase on a menu to exit)", 6, inPlayAsMonk ? 44 : VH - 4);
   }
 
   // touch joystick overlay

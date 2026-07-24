@@ -617,6 +617,134 @@ quasi("quasi_run_f1", QUA_LEGS_STAND, 0)
 quasi("quasi_run_f2", QUA_LEGS_B, 1)
 quasi("quasi_run_f3", QUA_LEGS_STAND, 0)
 
+# ---------------------------------------------------------- orc grunt ------
+# the basic orc, redrawn by hand: broad jaw, tusks, red eyes, loincloth,
+# wooden club — replaces the downscaled CraftPix grunt as the wave-1 orc.
+GRU_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "G": (116, 158, 66, 255),  # skin
+    "g": (80, 112, 48, 255),   # skin shade
+    "E": (232, 58, 48, 255),   # eyes
+    "T": (240, 236, 220, 255), # tusks
+    "B": (110, 76, 46, 255),   # loincloth
+    "b": (74, 52, 34, 255),    # loincloth shade
+    "W": (140, 100, 58, 255),  # club wood
+    "w": (100, 70, 42, 255),   # club shade
+}
+
+GRU_TOP = """
+....KKKKK......
+...KGGGGGK.....
+..KGGGGGGGK....
+..KGEGGGEGK....
+..KGGGGGGGK.K..
+..KGgGGGgGKKWK.
+..KTGGGGGTKWwK.
+..KGTGGGTGKWwK.
+...KGGGGGKKWwK.
+..KGGGGGGGKWK..
+.KGgKGGGKgKWK..
+.KGK.KGGGKKK...
+.KK..KGGGGK....
+....KBBBBBK....
+....KbBBBbK....
+""".strip("\n")
+
+GRU_LEGS_STAND = """
+....KGGKGGK....
+....KgK.KgK....
+.....K...K.....
+""".strip("\n")
+
+GRU_LEGS_A = """
+....KGGK.KGGK..
+...KgK....KgK..
+....K......K...
+""".strip("\n")
+
+GRU_LEGS_B = """
+..KGGK.KGGK....
+..KgK....KgK...
+...K......K....
+""".strip("\n")
+
+
+def grunt(name, legs, bob):
+    save_grid(name, ("." * 15 + "\n") * bob + GRU_TOP + "\n" + legs, GRU_PAL)
+
+
+grunt("orc_grunt_idle_f0", GRU_LEGS_STAND, 1)
+grunt("orc_grunt_idle_f1", GRU_LEGS_STAND, 0)
+grunt("orc_grunt_idle_f2", GRU_LEGS_STAND, 0)
+grunt("orc_grunt_idle_f3", GRU_LEGS_STAND, 1)
+grunt("orc_grunt_run_f0", GRU_LEGS_A, 1)
+grunt("orc_grunt_run_f1", GRU_LEGS_STAND, 0)
+grunt("orc_grunt_run_f2", GRU_LEGS_B, 1)
+grunt("orc_grunt_run_f3", GRU_LEGS_STAND, 0)
+
+# ------------------------------------------------------------- monk --------
+# dev-only test hero: bald, saffron robe, gold sash, serene.
+MON_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "F": (228, 186, 152, 255), # skin
+    "f": (198, 152, 120, 255), # skin shade
+    "R": (208, 122, 40, 255),  # robe
+    "r": (168, 92, 30, 255),   # robe shade
+    "Y": (226, 180, 62, 255),  # sash
+    "b": (74, 52, 34, 255),    # sandals
+}
+
+MON_TOP = """
+.....KKKK.....
+....KFFFFK....
+...KFFFFFFK...
+...KFKFFKFK...
+...KFFFFFFK...
+....KFffFK....
+....KRRRRK....
+...KRRRRRRK...
+..KRRRRRRRRK..
+..KFKRRRRKFK..
+..KFKRRRRKFK..
+..KKKRYYRKKK..
+...KRRYYRRK...
+...KRRRRRRK...
+...KrRRRRrK...
+...KrRRRRrK...
+""".strip("\n")
+
+MON_LEGS_STAND = """
+...KRRRRRRK...
+....KbKKbK....
+.....K..K.....
+""".strip("\n")
+
+MON_LEGS_A = """
+...KRRRRRRK...
+...KbK..KbK...
+....K....K....
+""".strip("\n")
+
+MON_LEGS_B = """
+...KRRRRRRK...
+....KbKKbK....
+...K......K...
+""".strip("\n")
+
+
+def monk(name, legs, bob):
+    save_grid(name, ("." * 14 + "\n") * bob + MON_TOP + "\n" + legs, MON_PAL)
+
+
+monk("monk_idle_f0", MON_LEGS_STAND, 1)
+monk("monk_idle_f1", MON_LEGS_STAND, 0)
+monk("monk_idle_f2", MON_LEGS_STAND, 0)
+monk("monk_idle_f3", MON_LEGS_STAND, 1)
+monk("monk_run_f0", MON_LEGS_A, 1)
+monk("monk_run_f1", MON_LEGS_STAND, 0)
+monk("monk_run_f2", MON_LEGS_B, 1)
+monk("monk_run_f3", MON_LEGS_STAND, 0)
+
 # ---------------------------------------------------------- assassin -------
 # hooded killer: slate hood and mask, only the eyes show, red sash.
 ASN_PAL = {
