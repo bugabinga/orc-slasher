@@ -828,6 +828,7 @@ const keys = {};
 window.addEventListener("keydown", e => {
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
+  if (G.state !== "play") devFeedKey(e.key);
   handleKey(e.code);
 });
 window.addEventListener("keyup", e => { keys[e.code] = false; });
@@ -992,7 +993,24 @@ const CLASSES = {
 const UN = { barbar: false, nun: false, reaper: false, scythe: false };
 try { Object.assign(UN, JSON.parse(localStorage.getItem("orcslasher_unlocks") || "{}")); } catch (e) { /* no storage */ }
 function saveUnlocks() { try { localStorage.setItem("orcslasher_unlocks", JSON.stringify(UN)); } catch (e) { /* no storage */ } }
-function isUnlocked(key) { return !key || UN[key]; }
+function isUnlocked(key) { return DEV.on || !key || UN[key]; }
+
+// developer mode — toggled by typing a secret passphrase on any menu screen.
+// Only the hash of the phrase is stored here, so the phrase can't be read
+// from the source. While active, every class and weapon is available.
+const DEV = { on: false, buf: "", HASH: 855446522, LEN: 10 };
+try { DEV.on = localStorage.getItem("orcslasher_dev") === "1"; } catch (e) { /* no storage */ }
+function djb2(s) { let h = 5381; for (const c of s) { h = (((h << 5) + h) ^ c.charCodeAt(0)) >>> 0; } return h; }
+function devFeedKey(k) {
+  if (!k || k.length !== 1) return;
+  DEV.buf = (DEV.buf + k.toLowerCase()).slice(-24);
+  if (DEV.buf.length >= DEV.LEN && djb2(DEV.buf.slice(-DEV.LEN)) === DEV.HASH) {
+    DEV.buf = "";
+    DEV.on = !DEV.on;
+    try { localStorage.setItem("orcslasher_dev", DEV.on ? "1" : "0"); } catch (e) { /* no storage */ }
+    SFX.level();
+  }
+}
 
 function baseStats(weaponId) {
   const w = WEAPONS[weaponId];
@@ -2292,6 +2310,13 @@ function frame(now) {
   }
   else if (G.state === "campfire") renderCampfire(dt);
   else if (G.state === "gameover" || G.state === "victory") { renderWorld(); renderHUD(); renderEnd(G.state === "victory", now / 1000); }
+
+  // dev mode badge
+  if (DEV.on) {
+    ctx.font = "bold 7px monospace"; ctx.textAlign = "left";
+    ctx.fillStyle = "#b48cff";
+    ctx.fillText("DEV MODE — all classes & weapons (retype phrase on a menu to exit)", 6, VH - 4);
+  }
 
   // touch joystick overlay
   if (touchState.active && G.state === "play") {
