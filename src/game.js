@@ -297,17 +297,17 @@ let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePa
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
-  sword: { name: "Knight Sword", desc: "steady swings, wide arc", sprite: "weapon_regular_sword", dmg: 10, atkSpd: 1.0, range: 36, arc: 1.15 },
-  knives: { name: "Twin Knives", desc: "fast stabs, short reach, +move", sprite: "weapon_knife", dmg: 5, atkSpd: 2.2, range: 27, arc: 1.35 },
-  bow: { name: "Longbow", desc: "10 arrows, then 3s reload", sprite: "weapon_bow", dmg: 7, atkSpd: 1.8, range: 150, arc: 0, ranged: true, clip: 10, reload: 3 },
-  whip: { name: "Whip", desc: "long lash, narrow snap", sprite: "weapon_whip", dmg: 6, atkSpd: 1.5, range: 60, arc: 0.55 },
-  axe: { name: "War Axe", desc: "heavy chop, wide arc", sprite: "weapon_waraxe", dmg: 13, atkSpd: 0.85, range: 34, arc: 1.5 },
-  spear: { name: "Spear", desc: "long thrust, pierces a line", sprite: "weapon_spear", dmg: 9, atkSpd: 1.2, range: 55, arc: 0.45 },
-  scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 15, atkSpd: 0.75, range: 44, arc: 2.4, unlock: "scythe" },
-  molotov: { name: "Molotov", desc: "lobbed firebomb, burns the ground", sprite: "weapon_molotov", dmg: 12, atkSpd: 0.6, range: 130, arc: 0, thrown: true },
-  shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 4, atkSpd: 2.5, range: 24, arc: 1.2 },
-  katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 11, atkSpd: 1.3, range: 40, arc: 0.9 },
-  shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 4, atkSpd: 2.6, range: 120, arc: 0, star: true },
+  sword: { name: "Knight Sword", desc: "steady swings, wide arc", sprite: "weapon_regular_sword", dmg: 11, atkSpd: 1.1, range: 38, arc: 1.15 },
+  knives: { name: "Twin Knives", desc: "fast stabs, short reach, +move", sprite: "weapon_knife", dmg: 6, atkSpd: 2.3, range: 28, arc: 1.35 },
+  bow: { name: "Longbow", desc: "10 arrows, then 3s reload", sprite: "weapon_bow", dmg: 8, atkSpd: 2.0, range: 155, arc: 0, ranged: true, clip: 10, reload: 3 },
+  whip: { name: "Whip", desc: "long lash, narrow snap", sprite: "weapon_whip", dmg: 7, atkSpd: 1.6, range: 62, arc: 0.55 },
+  axe: { name: "War Axe", desc: "heavy chop, wide arc", sprite: "weapon_waraxe", dmg: 14, atkSpd: 0.9, range: 35, arc: 1.5 },
+  spear: { name: "Spear", desc: "long thrust, pierces a line", sprite: "weapon_spear", dmg: 10, atkSpd: 1.25, range: 58, arc: 0.45 },
+  scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 17, atkSpd: 0.8, range: 46, arc: 2.4, unlock: "scythe" },
+  molotov: { name: "Molotov", desc: "lobbed firebomb, burns the ground", sprite: "weapon_molotov", dmg: 14, atkSpd: 0.7, range: 135, arc: 0, thrown: true },
+  shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 5, atkSpd: 2.6, range: 25, arc: 1.2 },
+  katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
+  shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 5, atkSpd: 2.8, range: 125, arc: 0, star: true },
 };
 
 // classes -------------------------------------------------------------------
@@ -466,10 +466,10 @@ const bossFor = w => BOSS_CYCLE[(Math.floor(w / 5) - 1 + BOSS_CYCLE.length) % BO
 function waveComposition(w) {
   const list = [];
   const add = (type, n) => { for (let i = 0; i < n; i++) list.push(type); };
-  add("goblin", clamp(6 + w * 2, 0, 22));
-  if (w >= 2) add("orc_warrior", 2 + w);
-  if (w >= 3) add("orc_blade", w - 1);
-  if (w >= 3) add("masked_orc", w - 2);
+  add("goblin", clamp(8 + w * 2, 0, 26));
+  if (w >= 1) add("orc_warrior", 2 + Math.floor(w * 1.6));
+  if (w >= 3) add("orc_blade", w);
+  if (w >= 3) add("masked_orc", w - 1);
   if (w >= 4) add("orc_shaman", Math.floor(w / 2) + 1);
   if (w >= 5) add("orc_berserker", w - 3);
   if (w >= 5) add("frost_orc", Math.floor(w / 2) - 1);
