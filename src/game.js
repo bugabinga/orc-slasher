@@ -210,12 +210,13 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, arrows, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
   sword: { name: "Knight Sword", desc: "steady swings, wide arc", sprite: "weapon_regular_sword", dmg: 10, atkSpd: 1.0, range: 36, arc: 1.15 },
   knives: { name: "Twin Knives", desc: "fast stabs, short reach, +move", sprite: "weapon_knife", dmg: 5, atkSpd: 2.2, range: 27, arc: 1.35 },
+  bow: { name: "Longbow", desc: "10 arrows, then 3s reload", sprite: "weapon_bow", dmg: 7, atkSpd: 1.8, range: 150, arc: 0, ranged: true, clip: 10, reload: 3 },
 };
 
 function baseStats(weaponId) {
@@ -236,9 +237,9 @@ function newRun(weaponId) {
     stats: baseStats(weaponId), banked: 0,
     facing: 1, moving: false, animT: 0,
     atkCd: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
-    flash: 0,
+    flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; fx = []; texts = [];
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false;
   startWave(1);
@@ -450,6 +451,22 @@ function playerMeleeAttack() {
   }
 }
 
+function playerBowAttack() {
+  const st = player.stats;
+  const target = nearestEnemy(player, st.range);
+  if (!target) return;
+  player.atkCd = 1 / st.atkSpd;
+  const ang = Math.atan2(target.y - player.y, target.x - player.x);
+  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
+  arrows.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 300, vy: Math.sin(ang) * 300, ang, life: 0.8 });
+  SFX.slash();
+  player.ammo--;
+  if (player.ammo <= 0) {
+    player.reloadT = WEAPONS[G.weapon].reload;
+    texts.push({ x: player.x, y: player.y - 28, s: "reloading…", life: 1, col: "#ffd166" });
+  }
+}
+
 // ------------------------------------------------------------------ update --
 function updatePlay(dt) {
   G.t += dt;
@@ -483,7 +500,14 @@ function updatePlay(dt) {
 
   // -- attacks
   player.atkCd -= dt;
-  if (player.atkCd <= 0) playerMeleeAttack();
+  if (WEAPONS[G.weapon].ranged) {
+    if (player.reloadT > 0) {
+      player.reloadT -= dt;
+      if (player.reloadT <= 0) { player.ammo = WEAPONS[G.weapon].clip; SFX.card(); }
+    } else if (player.atkCd <= 0) {
+      playerBowAttack();
+    }
+  } else if (player.atkCd <= 0) playerMeleeAttack();
 
   // -- spawning
   spawnTimer += dt;
@@ -550,6 +574,19 @@ function updatePlay(dt) {
   }
 
   // -- projectiles
+  for (const a of [...arrows]) {
+    a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt;
+    for (const e of enemies) {
+      if (e.warmup > 0) continue;
+      if (dist(a, { x: e.x, y: e.y - 4 }) < e.r + 5) {
+        const crit = Math.random() < st.crit;
+        damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+        a.life = 0;
+        break;
+      }
+    }
+    if (a.life <= 0) arrows.splice(arrows.indexOf(a), 1);
+  }
   for (const b of [...bolts]) {
     b.x += b.vx * dt; b.y += b.vy * dt; b.t += dt;
     if (b.t > 2.4) { bolts.splice(bolts.indexOf(b), 1); continue; }
@@ -676,6 +713,12 @@ function renderWorld() {
   for (const d of drawables) d.draw();
 
   // projectiles & fx above
+  for (const a of arrows) {
+    ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.ang + Math.PI / 2);
+    const im = IMG.weapon_arrow;
+    ctx.drawImage(im, -im.width / 2, -im.height / 2);
+    ctx.restore();
+  }
   for (const b of bolts) drawSprite(animFrame(ANIM.bolt, b.t, 8), b.x, b.y + 3);
   for (const p of fx) {
     if (p.kind === "blood") {
@@ -717,10 +760,10 @@ function drawPlayer() {
   ctx.filter = "none"; ctx.globalAlpha = 1;
   // held weapon(s)
   const im = IMG[WEAPONS[G.weapon].sprite];
-  const swing = player.atkCd > 1 / st.atkSpd - 0.15 ? -1.2 : 0;
+  const swing = WEAPONS[G.weapon].ranged ? 0 : (player.atkCd > 1 / st.atkSpd - 0.15 ? -1.2 : 0);
   ctx.save();
   ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
-  ctx.rotate(player.facing * (0.5 + swing));
+  ctx.rotate(player.facing * (WEAPONS[G.weapon].ranged ? 0.15 : 0.5 + swing));
   ctx.scale(player.facing, 1);
   ctx.drawImage(im, -2, -im.height + 4);
   ctx.restore();
@@ -816,6 +859,18 @@ function renderHUD() {
   // dash cd
   if (player.dashCd > 0) { ctx.textAlign = "left"; ctx.fillStyle = "#6f6485"; ctx.fillText("dash…", 8, 33); }
   else { ctx.textAlign = "left"; ctx.fillStyle = "#9ae1ff"; ctx.fillText("DASH ⯈ space", 8, 33); }
+  // bow ammo
+  if (WEAPONS[G.weapon].ranged) {
+    if (player.reloadT > 0) {
+      bar(8, 38, 60, 4, 1 - player.reloadT / WEAPONS[G.weapon].reload, "#ffd166");
+      ctx.fillStyle = "#ffd166"; ctx.fillText("reloading", 72, 43);
+    } else {
+      for (let i = 0; i < WEAPONS[G.weapon].clip; i++) {
+        ctx.fillStyle = i < player.ammo ? "#ffd166" : "#3a3346";
+        ctx.fillRect(8 + i * 6, 38, 4, 4);
+      }
+    }
+  }
 }
 
 // campfire scene -----------------------------------------------------------
@@ -897,7 +952,7 @@ function renderSelect(t) {
 
   selectRects = [];
   const ids = Object.keys(WEAPONS);
-  const cw = 120, chh = 130, gap = 40;
+  const cw = 110, chh = 130, gap = 24;
   const total = ids.length * cw + (ids.length - 1) * gap;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], w = WEAPONS[id];
@@ -913,53 +968,114 @@ function renderSelect(t) {
     ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
     wrapText(w.desc, x + cw / 2, y + 95, cw - 16, 9);
     ctx.fillStyle = "#8a6a30";
-    ctx.fillText(`dmg ${w.dmg} · ${w.atkSpd}/s · reach ${w.range}`, x + cw / 2, y + 118);
+    ctx.fillText(w.ranged ? `dmg ${w.dmg} · ${w.atkSpd}/s · ${w.clip} arrows` : `dmg ${w.dmg} · ${w.atkSpd}/s · reach ${w.range}`, x + cw / 2, y + 118);
     ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
     ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 12);
   }
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText("click or press 1·2", VW / 2, VH - 12);
+  ctx.fillText("click or press 1·2·3", VW / 2, VH - 12);
 }
 
 // title / end screens -------------------------------------------------------
+let titleFloor = null;
 function renderTitle(t) {
-  ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
-  const g = ctx.createRadialGradient(VW / 2, 150, 10, VW / 2, 150, 160);
-  g.addColorStop(0, "rgba(252,150,50,0.18)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  // cave sky: vertical gradient + faint stalactite silhouettes
+  const sky = ctx.createLinearGradient(0, 0, 0, VH);
+  sky.addColorStop(0, "#070510"); sky.addColorStop(0.6, "#120c1c"); sky.addColorStop(1, "#1c1224");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, VW, VH);
+  ctx.fillStyle = "#0a0712";
+  for (let i = 0; i < 16; i++) {
+    const x = i * 32 + ((i * 53) % 17);
+    const h = 14 + ((i * 37) % 22);
+    ctx.beginPath();
+    ctx.moveTo(x - 10, 0); ctx.lineTo(x + 10, 0); ctx.lineTo(x, h);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // warm glow from the campfire corner + cool moonish glow right
+  let g = ctx.createRadialGradient(64, 216, 6, 64, 216, 190);
+  g.addColorStop(0, "rgba(252,150,50,0.30)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+  g = ctx.createRadialGradient(VW - 60, 90, 10, VW - 60, 90, 170);
+  g.addColorStop(0, "rgba(90,110,220,0.10)"); g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
 
-  ctx.textAlign = "center";
-  ctx.font = "bold 34px monospace";
-  ctx.fillStyle = "#2a1a10"; ctx.fillText("ORC SLASHER", VW / 2 + 2, 72);
-  ctx.fillStyle = "#ffd166"; ctx.fillText("ORC SLASHER", VW / 2, 70);
-  ctx.font = "8px monospace"; ctx.fillStyle = "#cfc6de";
-  ctx.fillText("a cave full of orcs. one knight. endless waves.", VW / 2, 88);
-
-  // parade of orcs
-  const parade = [
-    ["goblin_idle", "goblin", 1], ["cp_orc1_idle_d", "grunt", 1], ["cp_orc3_idle_d", "blade", 1],
-    ["masked_orc_idle", "masked", 1], ["orc_shaman_idle", "shaman", 1], ["orc_berserker_idle", "berserk", 1],
-    ["cp_frost_idle_d", "frost", 1], ["cp_orc2_idle_d", "general", 1], ["cp_night_idle_d", "night", 1],
-    ["cp_blood_idle_d", "blood", 1], ["ogre_idle", "ogre", 1], ["warchief_idle", "WARCHIEF", 1.6],
-  ];
-  const step = 38;
-  let x = VW / 2 - ((parade.length - 1) * step) / 2;
-  for (let i = 0; i < parade.length; i++) {
-    const [a, label, sc] = parade[i];
-    drawSprite(animFrame(ANIM[a], t + i * 0.3, 6), x, 150, false, sc);
-    ctx.font = "6px monospace"; ctx.fillStyle = label === "WARCHIEF" ? "#ff6b6b" : "#8f84a8";
-    ctx.fillText(label, x, 162);
-    x += step;
+  // drifting embers (deterministic per index — no flicker)
+  for (let i = 0; i < 34; i++) {
+    const spd = 9 + (i % 5) * 3;
+    const y = VH - ((t * spd + i * 41) % (VH + 24));
+    const x = ((i * 89) % VW) + Math.sin(t * 0.8 + i) * 9;
+    const a = clamp(y / VH, 0, 1) * 0.55;
+    ctx.fillStyle = i % 3 ? `rgba(255,160,64,${a})` : `rgba(255,220,120,${a})`;
+    const s = i % 4 === 0 ? 2 : 1;
+    ctx.fillRect(Math.round(x), Math.round(y), s, s);
   }
-  drawSprite(animFrame(ANIM.hero_run, t, 8), VW / 2 - 226, 150);
-  drawSprite(animFrame(ANIM.campfire, t, 8), VW / 2 + 228, 152);
 
-  ctx.font = "bold 10px monospace";
-  ctx.fillStyle = Math.floor(t * 2) % 2 ? "#fff" : "#ffd166";
-  ctx.fillText("PRESS ENTER / TAP TO SLAY", VW / 2, 204);
-  ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText("WASD move · auto-attack · SPACE dash · campfire card upgrades between waves", VW / 2, 224);
-  ctx.fillText("sprites: 0x72 DungeonTilesetII (CC0) · CraftPix top-down orcs · original warchief/campfire art", VW / 2, 236);
+  // title: layered gold-gradient wordmark with pulse
+  ctx.save();
+  ctx.translate(VW / 2, 74);
+  const pulse = 1 + Math.sin(t * 2) * 0.012;
+  ctx.scale(pulse, pulse);
+  ctx.textAlign = "center";
+  ctx.font = "bold 42px monospace";
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillText("ORC SLASHER", 3, 4);
+  const tg = ctx.createLinearGradient(0, -34, 0, 8);
+  tg.addColorStop(0, "#fff3c4"); tg.addColorStop(0.45, "#ffd166"); tg.addColorStop(0.85, "#e2762e"); tg.addColorStop(1, "#a33d1e");
+  ctx.fillStyle = tg; ctx.fillText("ORC SLASHER", 0, 0);
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(42,20,12,0.9)";
+  ctx.strokeText("ORC SLASHER", 0, 0);
+  ctx.restore();
+  ctx.textAlign = "center";
+  ctx.font = "8px monospace"; ctx.fillStyle = "#b9aed0";
+  ctx.fillText("— a cave full of orcs · one knight · endless waves —", VW / 2, 94);
+
+  // ground strip
+  if (!titleFloor) {
+    titleFloor = document.createElement("canvas");
+    titleFloor.width = VW; titleFloor.height = 40;
+    const fc = titleFloor.getContext("2d");
+    fc.imageSmoothingEnabled = false;
+    const names = ["floor_1", "floor_1", "floor_2", "floor_3", "floor_7"];
+    for (let i = 0; i <= VW / TILE; i++) {
+      fc.drawImage(IMG[names[(i * 7) % names.length]], i * TILE, 8);
+      fc.drawImage(IMG[names[(i * 3 + 1) % names.length]], i * TILE, 24);
+    }
+    fc.fillStyle = "rgba(6,4,14,0.45)"; fc.fillRect(0, 0, VW, 40);
+  }
+  ctx.drawImage(titleFloor, 0, VH - 62);
+
+  // the knight rests at his campfire, facing the marching horde
+  drawSprite(animFrame(ANIM.campfire, t, 8), 46, VH - 40, false, 1.5);
+  drawSprite(animFrame(ANIM.hero_idle, t, 6), 78, VH - 42, false, PLAYER_SCALE);
+
+  // endless orc horde marching left toward him
+  const MARCH = [
+    ["goblin_run", true, 1], ["cp_orc1_run_l", false, 1], ["orc_shaman_run", true, 1],
+    ["cp_orc3_run_l", false, 1], ["orc_berserker_run", true, 1], ["cp_frost_run_l", false, 1],
+    ["masked_orc_run", true, 1], ["cp_orc2_run_l", false, 1], ["cp_night_run_l", false, 1],
+    ["ogre_run", true, 1], ["cp_blood_run_l", false, 1], ["warchief_run", true, 1.5],
+  ];
+  const span = VW - 130 + 60;
+  for (let i = 0; i < MARCH.length; i++) {
+    const [a, flip, sc] = MARCH[i];
+    const x = 130 + ((i * 47 + 10000 - t * 26) % span);
+    const bob = Math.abs(Math.sin(t * 7 + i)) * 1.5;
+    drawSprite(animFrame(ANIM[a], t + i * 0.37, 9), x, VH - 42 - bob, flip, sc);
+  }
+  // darkness fades the far end of the horde
+  const fade = ctx.createLinearGradient(VW - 90, 0, VW, 0);
+  fade.addColorStop(0, "rgba(7,5,16,0)"); fade.addColorStop(1, "rgba(7,5,16,0.85)");
+  ctx.fillStyle = fade; ctx.fillRect(VW - 90, VH - 90, 90, 90);
+
+  // prompt + footer
+  ctx.font = "bold 11px monospace";
+  const blink = (Math.sin(t * 4) + 1) / 2;
+  ctx.fillStyle = `rgba(255,${209 + blink * 40},${102 + blink * 140},${0.6 + blink * 0.4})`;
+  ctx.fillText("PRESS ENTER / TAP TO SLAY", VW / 2, 130);
+  ctx.font = "7px monospace"; ctx.fillStyle = "#8f84a8";
+  ctx.fillText("WASD move · auto-attack · SPACE dash · rest at the campfire, pick your cards", VW / 2, 148);
+  ctx.fillStyle = "#57506b";
+  ctx.fillText("sprites: 0x72 DungeonTilesetII (CC0) · CraftPix top-down orcs · original warchief & campfire art", VW / 2, 162);
 }
 
 function renderEnd(victory, t) {
@@ -987,8 +1103,10 @@ function renderEnd(victory, t) {
 function handleKey(code) {
   if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "select"; }
   else if (G.state === "select") {
-    if (code === "Digit1") newRun("sword");
-    if (code === "Digit2") newRun("knives");
+    const ids = Object.keys(WEAPONS);
+    if (code === "Digit1") newRun(ids[0]);
+    if (code === "Digit2") newRun(ids[1]);
+    if (code === "Digit3" && ids[2]) newRun(ids[2]);
   } else if (G.state === "campfire") {
     if (code === "Digit1") pickCard(0);
     if (code === "Digit2") pickCard(1);

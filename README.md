@@ -22,7 +22,7 @@ between waves. Survive to wave 10 and slay the **Orc Warchief**.
 | WASD / arrows | move |
 | — | attack (auto-aims nearest orc) |
 | Space / Shift | dash (i-frames, 2s cooldown) |
-| 1·2 / click | choose starting weapon (knight sword or twin knives) |
+| 1·2·3 / click | choose starting weapon: knight sword, twin knives, or longbow (10 arrows, 3s reload) |
 | 1·2·3 / click | pick upgrade card at the campfire |
 | touch drag | virtual joystick (mobile) |
 
