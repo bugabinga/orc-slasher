@@ -1383,6 +1383,98 @@ function wrapText(text, x, y, maxW, lh) {
   ctx.fillText(line, x, yy);
 }
 
+// credits screen -------------------------------------------------------------
+let creditLines = null, creditsH = 0, creditsT0 = 0, creditsRect = null;
+
+function drawHeart(x, y, c) {
+  ctx.fillStyle = c;
+  const px = [[1, 0], [2, 0], [4, 0], [5, 0], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1],
+    [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [5, 2], [6, 2], [1, 3], [2, 3], [3, 3], [4, 3], [5, 3], [2, 4], [3, 4], [4, 4], [3, 5]];
+  for (const [dx, dy] of px) ctx.fillRect(x + dx, y + dy, 1, 1);
+}
+
+function wrapLines(text, font, maxW) {
+  ctx.font = font;
+  const out = [], words = text.split(" ");
+  let line = "";
+  for (const w of words) {
+    const t = line ? line + " " + w : w;
+    if (ctx.measureText(t).width > maxW && line) { out.push(line); line = w; }
+    else line = t;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+function buildCreditLines() {
+  const C = window.CREDITS;
+  const L = [];
+  const push = (s, font, col, gap, deco) => L.push({ s, font, col, gap, deco });
+  push(C.title, "bold 15px monospace", "#ffd166", 30, "heart");
+  for (const sec of C.sections) {
+    push("— " + sec.heading + " —", "bold 10px monospace", "#e2762e", 20);
+    for (const e of sec.entries) {
+      push(e.name, "bold 12px monospace", "#fff", 12);
+      for (const l of wrapLines(e.work, "8px monospace", 320)) push(l, "8px monospace", "#b9aed0", 10);
+      if (e.thanks) for (const l of wrapLines("“" + e.thanks + "”", "8px monospace", 300)) push(l, "8px monospace", "#8f84a8", 10);
+      const meta = [e.license, e.url].filter(Boolean).join(" · ");
+      if (meta) push(meta, "7px monospace", "#7bd88f", 10);
+      push("", "7px monospace", "#000", 12);
+    }
+    push("", "7px monospace", "#000", 8);
+  }
+  for (const l of wrapLines(C.outro, "bold 9px monospace", 320)) push(l, "bold 9px monospace", "#ffd166", 12);
+  push("", "7px monospace", "#000", 20);
+  push("press anything to return to the fire", "7px monospace", "#57506b", 10, "heart");
+  creditsH = L.reduce((a, l) => a + l.gap, 0);
+  return L;
+}
+
+function renderCredits(t) {
+  const sky = ctx.createLinearGradient(0, 0, 0, VH);
+  sky.addColorStop(0, "#070510"); sky.addColorStop(1, "#1c1224");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, VW, VH);
+  const g = ctx.createRadialGradient(VW / 2, VH - 20, 6, VW / 2, VH - 20, 170);
+  g.addColorStop(0, "rgba(252,150,50,0.22)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+  for (let i = 0; i < 24; i++) { // embers
+    const y = VH - ((t * (8 + (i % 5) * 3) + i * 47) % (VH + 20));
+    const x = ((i * 97) % VW) + Math.sin(t * 0.7 + i) * 8;
+    ctx.fillStyle = `rgba(255,170,70,${clamp(y / VH, 0, 1) * 0.5})`;
+    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+  }
+
+  if (!creditLines) creditLines = buildCreditLines();
+  const speed = 16;
+  const span = creditsH + VH + 30;
+  let y = VH + 16 - ((t - creditsT0) * speed) % span;
+  ctx.textAlign = "center";
+  for (const l of creditLines) {
+    if (y > -20 && y < VH + 20 && l.s) {
+      ctx.font = l.font; ctx.fillStyle = l.col;
+      ctx.fillText(l.s, VW / 2, y);
+      if (l.deco === "heart") {
+        const w = ctx.measureText(l.s).width;
+        drawHeart(VW / 2 - w / 2 - 16, y - 6, "#e4485a");
+        drawHeart(VW / 2 + w / 2 + 9, y - 6, "#e4485a");
+      }
+    }
+    y += l.gap;
+  }
+
+  // lines melt into darkness before reaching the fire
+  const fade = ctx.createLinearGradient(0, VH - 96, 0, VH - 34);
+  fade.addColorStop(0, "rgba(13,9,22,0)"); fade.addColorStop(1, "rgba(13,9,22,1)");
+  ctx.fillStyle = fade; ctx.fillRect(0, VH - 96, VW, 96);
+  const fadeTop = ctx.createLinearGradient(0, 0, 0, 26);
+  fadeTop.addColorStop(0, "rgba(7,5,16,0.95)"); fadeTop.addColorStop(1, "rgba(7,5,16,0)");
+  ctx.fillStyle = fadeTop; ctx.fillRect(0, 0, VW, 26);
+
+  // the knight rests by the fire while the names roll
+  drawSprite(animFrame(ANIM.campfire, t, 8), VW / 2 + 16, VH - 12, false, 1.5);
+  drawSprite(animFrame(ANIM.hero_idle, t, 6), VW / 2 - 18, VH - 14, false, PLAYER_SCALE);
+}
+
 // key button + sound toggles + password modal --------------------------------
 let sndBtnRects = [];
 function menuButton(x, on) {
@@ -1644,6 +1736,12 @@ function renderTitle(t) {
   const blink = (Math.sin(t * 4) + 1) / 2;
   ctx.fillStyle = `rgba(255,${209 + blink * 40},${102 + blink * 140},${0.6 + blink * 0.4})`;
   ctx.fillText("PRESS ENTER / TAP TO SLAY", VW / 2, 138);
+  // credits link
+  creditsRect = { x: 6, y: 6, w: 64, h: 16 };
+  drawHeart(creditsRect.x + 4, creditsRect.y + 5, "#e4485a");
+  ctx.font = "bold 8px monospace"; ctx.textAlign = "left"; ctx.fillStyle = "#8f84a8";
+  ctx.fillText("CREDITS", creditsRect.x + 15, creditsRect.y + 12);
+  ctx.textAlign = "center";
   drawKeyButton();
 }
 
@@ -1670,7 +1768,9 @@ function renderEnd(victory, t) {
 
 // ------------------------------------------------------------- input glue --
 function handleKey(code) {
-  if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "cls"; }
+  if (G.state === "title" && code === "KeyC") { audio(); creditsT0 = performance.now() / 1000; G.state = "credits"; }
+  else if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "cls"; }
+  else if (G.state === "credits") { G.state = "title"; }
   else if (G.state === "cls") {
     const ids = Object.keys(CLASSES);
     const m = /^Digit([1-9])$/.exec(code);
@@ -1731,6 +1831,12 @@ function handleClick(x, y) {
     }
     return true;
   }
+  if (G.state === "title" && creditsRect &&
+      x >= creditsRect.x - 3 && x <= creditsRect.x + creditsRect.w + 3 &&
+      y >= creditsRect.y - 3 && y <= creditsRect.y + creditsRect.h + 3) {
+    creditsT0 = performance.now() / 1000; G.state = "credits"; return true;
+  }
+  if (G.state === "credits") { G.state = "title"; return true; }
   if (G.state === "title") { G.state = "cls"; return true; }
   if (G.state === "cls") {
     for (const r of clsRects) {
@@ -1793,6 +1899,7 @@ function frame(now) {
   }
 
   if (G.state === "title") renderTitle(now / 1000);
+  else if (G.state === "credits") renderCredits(now / 1000);
   else if (G.state === "cls") renderClassSelect(now / 1000);
   else if (G.state === "select") renderSelect(now / 1000);
   else if (G.state === "play") {

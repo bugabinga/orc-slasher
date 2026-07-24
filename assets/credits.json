@@ -1,0 +1,82 @@
+{
+  "title": "MADE WITH LOVE, PIXELS & GRATITUDE",
+  "sections": [
+    {
+      "heading": "PIXEL ART",
+      "entries": [
+        {
+          "name": "0x72",
+          "work": "DungeonTileset II — our knight, the goblins, shamans, ogres, every wall and floor of this cave",
+          "license": "CC0",
+          "url": "0x72.itch.io/dungeontileset-ii",
+          "thanks": "the beating heart of this dungeon. thank you for giving it away so freely."
+        },
+        {
+          "name": "CraftPix.net",
+          "work": "Free Top-Down Orc Characters — the grunt, the blademaster, the general, in all four directions",
+          "license": "CraftPix free license",
+          "url": "craftpix.net/freebies",
+          "thanks": "three magnificent orcs that march, swing and fall with style."
+        },
+        {
+          "name": "Claude",
+          "work": "Warchief, Butcher, Shaman King, Nun, Quasimodo, berserkers, campfire, cards, whip, scythe & effects",
+          "license": "CC0",
+          "url": "",
+          "thanks": "drawn pixel by pixel, just for this cave."
+        },
+        {
+          "name": "Kenney",
+          "work": "Tiny Dungeon pack — our trusty backup that never had to fight",
+          "license": "CC0",
+          "url": "kenney.nl",
+          "thanks": "the patron saint of game jams everywhere."
+        }
+      ]
+    },
+    {
+      "heading": "SOUND",
+      "entries": [
+        {
+          "name": "WebAudio synth",
+          "work": "every slash, gem, roar and the ambient cave loop — generated live, no files",
+          "license": "original",
+          "url": "",
+          "thanks": "four oscillators in a trench coat."
+        },
+        {
+          "name": "OpenGameArt community",
+          "work": "researched CC0 packs by Juhani Junkala, rubberduck & friends (see docs/AUDIO.md)",
+          "license": "CC0 / CC-BY",
+          "url": "opengameart.org",
+          "thanks": "a treasure cave of libre sound, waiting for our next update."
+        }
+      ]
+    },
+    {
+      "heading": "INSPIRATION",
+      "entries": [
+        {
+          "name": "Brotato",
+          "work": "by Blobfish — the wave-and-shop loop this game lovingly borrows",
+          "license": "",
+          "url": "",
+          "thanks": "a potato showed us the way."
+        }
+      ]
+    },
+    {
+      "heading": "SPECIAL THANKS",
+      "entries": [
+        {
+          "name": "You",
+          "work": "for playing, for slashing, for sitting by our little fire",
+          "license": "",
+          "url": "",
+          "thanks": "the cave is warmer with you in it."
+        }
+      ]
+    }
+  ],
+  "outro": "…and to every orc that fell so this game could live. WAAAGH!"
+}

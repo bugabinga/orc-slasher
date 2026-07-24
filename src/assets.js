@@ -695,3 +695,86 @@ window.ASSETS = {
   "cp_orc3_run_u_f6": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACyUlEQVR4nO2WXUhTYRjHf6eGuvmR2aaktqYx21gr/EjFGAtsIFTWjRcqmTDwwvQmIQgCvenGu8guDQksqAtvuosuQggV3YVmSgrZdIWb9jGbH7R4u7Azpm7ubBJ24R8OB877nOf/f/7PeZ/zSkII9hOH9pX9fxCgihUgSVLUtQJDkQD4OPchelAYIrU7YQcKDEXCcLqKFHV6SEgi2HMLTOcde3pfirULIrVAX2YVVzVzDK/bCKwssr62AsRuxZ5aoC+zCvluaytH1dnEsneW1PQcqrpsO+KUQrEA9+iE1Njn3JK8ttdBYGWRt12D/NYm09jnFO7RCUUfpIyYuyAcmY+fo6+oAWBpfh0gZL++wsRgz0g86QCFDrQ3lgqAphYz7uFpfniCoTXZfvfwNHL1crwSKHLgYf+YtOAeFjpdHmd7LvL98yqg2RKT7F6Ii1iGol1gzD4qahyFADg7OrnXepvxoHoLubx+vbmVaocz4ncQiSumgKKcrFBAStJhNMmbpl2RMnH5/JToMnid8hPruRxGhjyo1SrS0lJ4OTS7Q0RCAuQ5cOX+TTE+4KJ0ZpkSXQYAlRYtQ5NLPPEvhuI39PlE2wkJzwF9mVUcydusvESXgTcQpNKiZd4bIE+n5u4pAxv6fJIuFGNrK1eSMj4BckXu0QnJ5fNTbEhn3hsA4ER2Kh7fGqUzy1xqMzPYMxLXMFI8iPqbe0O2enxroQvA5fMD8KD6kZTsXuCa/YbStPH9jExme/1UrrFBJgSY9wYYMx5jKtfYYDLb62e83yRr7WXaO7oVuRDXJARYTf369NcdB67uV8Bm9ZpcY0N4TIvdIr345BfawgLReatu19EctwCA8QHXDtLtqDuZIU0GhTh+ZlJ8efeeaELiFqAJZO1KHA6Lapfj1F8kdB4wme31259NT715FossoUH0r7Hvp+IDAQcCDgTsu4A/iCgLIrqLvYQAAAAASUVORK5CYII=",
   "cp_orc3_run_u_f7": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACvUlEQVR4nO2WXUhTYRjHf6ckzbByuiI/lkV+xFBEC83w60IIGoVCF9mFF1EXgTd5qZCRXhTYTdFdVGAfIGSiF0mgVjcafoDmB0wyNzfdmWvTsU3LOF3IThtt7mwmu/F/c877nud9nv95nv/zvq8gSRLRxJ6oRgdiQhkIghBw/kRGlpRfVoPDskR/7/PARj4IlumIM5BfVgPAkmEiUhfbI+DFmse5rfVCKBEGKoGutU5a6rLiclrIOVvFr+xFehpfbFmGYHFCasALzZlc2cOh1BgmxVkyskswzoxj+zTr990wPBFSE14oLoFheELIqy4gIV0tzzntIjZxFoCEdDV51QVhBQ+LAEB77RwAK6YNSppLcTktlDSXor1xDoDxztFw3CknUH+tUAJorBvDabTKJHyfTqNV/nuvvRIo0sCjlyPCgmFIUqtTma+sYG7YSGJKEmseJw6zG7vZRl6MB71nQbJaTaRpihSXQVEXZB5JlC5UnQTgesMdmm7dZu6YRrY5sWig5clDnrbdBeD9h2/oRbsfiWBxQhLIOqqSDeL27SU+djNpOuEwxdpkBieX6ZEcALjXN1j7+Vte60si4jb0daJrrZOKng35fU9V70e3KQtmWs7z+fGXnWlDAIfZ7RfYKLrkd4Dk9Diq75eF4zL8nfDeqRzJG9Bk9VCsTcYouuiesvA11sO6Ji1gBv7bYTRqXaV7yoLJ6kF0bbbg2HcnnStmQS/ahaa2N9Q3PFDchmET6FwxC5q31fJ4cHKZvuK/HXGzXCvkXrqomERYJcg5XX4VwH3gx6tCvU2eH8lMIt6lqgWYmf74GqBjflWa6ulloKMdgL7+dwGFqfgw8kW8S1U7naLyGf9rc+X4QaGy4rIE0D/QFbQrIiKgFFsF9iLqd8KILiReLfjCW/tgiHgr3mlEvQS7BHYJ7BKIOoE/MTkionOnSMEAAAAASUVORK5CYII="
 };
+// source of truth: assets/credits.json
+window.CREDITS = {
+ "title": "MADE WITH LOVE, PIXELS & GRATITUDE",
+ "sections": [
+  {
+   "heading": "PIXEL ART",
+   "entries": [
+    {
+     "name": "0x72",
+     "work": "DungeonTileset II \u2014 our knight, the goblins, shamans, ogres, every wall and floor of this cave",
+     "license": "CC0",
+     "url": "0x72.itch.io/dungeontileset-ii",
+     "thanks": "the beating heart of this dungeon. thank you for giving it away so freely."
+    },
+    {
+     "name": "CraftPix.net",
+     "work": "Free Top-Down Orc Characters \u2014 the grunt, the blademaster, the general, in all four directions",
+     "license": "CraftPix free license",
+     "url": "craftpix.net/freebies",
+     "thanks": "three magnificent orcs that march, swing and fall with style."
+    },
+    {
+     "name": "Claude",
+     "work": "Warchief, Butcher, Shaman King, Nun, Quasimodo, berserkers, campfire, cards, whip, scythe & effects",
+     "license": "CC0",
+     "url": "",
+     "thanks": "drawn pixel by pixel, just for this cave."
+    },
+    {
+     "name": "Kenney",
+     "work": "Tiny Dungeon pack \u2014 our trusty backup that never had to fight",
+     "license": "CC0",
+     "url": "kenney.nl",
+     "thanks": "the patron saint of game jams everywhere."
+    }
+   ]
+  },
+  {
+   "heading": "SOUND",
+   "entries": [
+    {
+     "name": "WebAudio synth",
+     "work": "every slash, gem, roar and the ambient cave loop \u2014 generated live, no files",
+     "license": "original",
+     "url": "",
+     "thanks": "four oscillators in a trench coat."
+    },
+    {
+     "name": "OpenGameArt community",
+     "work": "researched CC0 packs by Juhani Junkala, rubberduck & friends (see docs/AUDIO.md)",
+     "license": "CC0 / CC-BY",
+     "url": "opengameart.org",
+     "thanks": "a treasure cave of libre sound, waiting for our next update."
+    }
+   ]
+  },
+  {
+   "heading": "INSPIRATION",
+   "entries": [
+    {
+     "name": "Brotato",
+     "work": "by Blobfish \u2014 the wave-and-shop loop this game lovingly borrows",
+     "license": "",
+     "url": "",
+     "thanks": "a potato showed us the way."
+    }
+   ]
+  },
+  {
+   "heading": "SPECIAL THANKS",
+   "entries": [
+    {
+     "name": "You",
+     "work": "for playing, for slashing, for sitting by our little fire",
+     "license": "",
+     "url": "",
+     "thanks": "the cave is warmer with you in it."
+    }
+   ]
+  }
+ ],
+ "outro": "\u2026and to every orc that fell so this game could live. WAAAGH!"
+};
