@@ -287,6 +287,137 @@ warchief("orc_warchief_run_f1", WCH_LEGS_STAND, 0)
 warchief("orc_warchief_run_f2", WCH_LEGS_B, 1)
 warchief("orc_warchief_run_f3", WCH_LEGS_STAND, 0)
 
+# ------------------------------------------------------ orc butcher boss ---
+# wave-5 boss: fat orc in a blood-stained apron, cleaver in fist.
+BUT_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "G": (110, 152, 62, 255),  # skin
+    "g": (74, 106, 46, 255),   # skin shade
+    "W": (226, 220, 206, 255), # apron
+    "w": (196, 188, 172, 255), # apron shade
+    "R": (162, 40, 44, 255),   # blood stains
+    "A": (188, 196, 210, 255), # cleaver steel
+    "a": (120, 128, 146, 255), # cleaver shade
+    "D": (52, 40, 34, 255),    # strap / boots
+    "T": (240, 236, 220, 255), # tusks
+}
+
+BUT_TOP = """
+......KKKKKK......
+.....KGGGGGGK.....
+....KGGGGGGGGK....
+....KGgRGGRgGK....
+....KGGGGGGGGK....
+....KGTGGGGTGK....
+.....KTGGGGTK.....
+....KGKKKKKKGK....
+...KGGKWWWWKGGK...
+..KGGKWWWWWWKGGK..
+..KGKWWRWWWWKKGK..
+.KGGKWWWRWWWWKGGK.
+.KGKWWWWWWRWWKKGK.
+.KGKWRWWWWWWWKAAK.
+.KGKWWWWRWWWWKAaK.
+..KKWWWWWWWRWKAaK.
+...KWWRWWWWWWKAAK.
+...KwWWWWWRWwK.K..
+...KwWWWWWWWwK....
+....KDWWWWWDK.....
+""".strip("\n")
+
+BUT_LEGS_STAND = """
+....KGGKKGGK......
+....KDDK.KDDK.....
+.....KK...KK......
+""".strip("\n")
+
+BUT_LEGS_A = """
+....KGGK.KGGK.....
+...KDDK...KDDK....
+....KK.....KK.....
+""".strip("\n")
+
+BUT_LEGS_B = """
+....KGGKKGGK......
+...KDDK..KDDK.....
+....KK....KK......
+""".strip("\n")
+
+
+def butcher(name, legs, bob):
+    save_grid(name, ("." * 18 + "\n") * bob + BUT_TOP + "\n" + legs, BUT_PAL)
+
+
+butcher("orc_butcher_idle_f0", BUT_LEGS_STAND, 1)
+butcher("orc_butcher_idle_f1", BUT_LEGS_STAND, 0)
+butcher("orc_butcher_idle_f2", BUT_LEGS_STAND, 0)
+butcher("orc_butcher_idle_f3", BUT_LEGS_STAND, 1)
+butcher("orc_butcher_run_f0", BUT_LEGS_A, 1)
+butcher("orc_butcher_run_f1", BUT_LEGS_STAND, 0)
+butcher("orc_butcher_run_f2", BUT_LEGS_B, 1)
+butcher("orc_butcher_run_f3", BUT_LEGS_STAND, 0)
+
+# --------------------------------------------------- orc shaman king boss --
+# wave-15 boss: robed orc mystic, skull mask, antler crown, orb staff.
+SHK_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "P": (96, 60, 130, 255),   # robe purple
+    "p": (66, 40, 94, 255),    # robe shade
+    "W": (238, 234, 222, 255), # skull mask
+    "w": (196, 190, 176, 255), # skull shade
+    "G": (110, 152, 62, 255),  # orc hands
+    "E": (60, 220, 90, 255),   # glowing eyes / orb
+    "e": (26, 130, 60, 255),   # orb shade
+    "Y": (226, 180, 62, 255),  # antler crown gold
+    "S": (94, 66, 44, 255),    # staff wood
+}
+
+SHK_TOP = """
+..KY.K......K.YK..
+..KYYK......KYYK..
+...KYYK....KYYK...
+....KYKKKKKKYK....
+....KPPPPPPPPK....
+...KPWWWWWWWWPK...
+...KPWEWWWWEWPK...
+...KPWWWWWWWWPK...
+...KPWwKWWKwWPK...
+....KPWwWWwWPKKE..
+....KPPKWWKPPKEeK.
+...KPPPPPPPPPKKE..
+..KPPPPPPPPPPKSK..
+..KGKPPPPPPPPKSK..
+..KGKpPPPPPPpKSK..
+..KKKpPPPPPPpKSK..
+....KpPPPPPPpKSK..
+....KPPPPPPPPKSK..
+...KPPPPPPPPPPKK..
+""".strip("\n")
+
+SHK_LEGS_STAND = """
+...KpPPPPPPPPpK...
+....KKKKKKKKKK....
+""".strip("\n")
+
+SHK_LEGS_A = """
+...KpPPPPPPPPpK...
+....KKKKKKKKKK....
+""".strip("\n")
+
+
+def shamanking(name, legs, bob):
+    save_grid(name, ("." * 18 + "\n") * bob + SHK_TOP + "\n" + legs, SHK_PAL)
+
+
+shamanking("orc_shamanking_idle_f0", SHK_LEGS_STAND, 1)
+shamanking("orc_shamanking_idle_f1", SHK_LEGS_STAND, 0)
+shamanking("orc_shamanking_idle_f2", SHK_LEGS_STAND, 0)
+shamanking("orc_shamanking_idle_f3", SHK_LEGS_STAND, 1)
+shamanking("orc_shamanking_run_f0", SHK_LEGS_A, 1)
+shamanking("orc_shamanking_run_f1", SHK_LEGS_STAND, 0)
+shamanking("orc_shamanking_run_f2", SHK_LEGS_A, 1)
+shamanking("orc_shamanking_run_f3", SHK_LEGS_STAND, 0)
+
 # ------------------------------------------------- berserker recolor -------
 # orc_warrior with skin shifted to red + warpaint: an elite variant.
 

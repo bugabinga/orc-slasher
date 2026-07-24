@@ -50,6 +50,10 @@ const ANIM = {
   ogre_run: ["ogre_run_f0", "ogre_run_f1", "ogre_run_f2", "ogre_run_f3"],
   warchief_idle: ["orc_warchief_idle_f0", "orc_warchief_idle_f1", "orc_warchief_idle_f2", "orc_warchief_idle_f3"],
   warchief_run: ["orc_warchief_run_f0", "orc_warchief_run_f1", "orc_warchief_run_f2", "orc_warchief_run_f3"],
+  butcher_idle: ["orc_butcher_idle_f0", "orc_butcher_idle_f1", "orc_butcher_idle_f2", "orc_butcher_idle_f3"],
+  butcher_run: ["orc_butcher_run_f0", "orc_butcher_run_f1", "orc_butcher_run_f2", "orc_butcher_run_f3"],
+  shamanking_idle: ["orc_shamanking_idle_f0", "orc_shamanking_idle_f1", "orc_shamanking_idle_f2", "orc_shamanking_idle_f3"],
+  shamanking_run: ["orc_shamanking_run_f0", "orc_shamanking_run_f1", "orc_shamanking_run_f2", "orc_shamanking_run_f3"],
   campfire: ["campfire_f0", "campfire_f1", "campfire_f2", "campfire_f3"],
   gem: ["xp_gem_f0", "xp_gem_f1"],
   coin: ["coin_f0", "coin_f1", "coin_f2", "coin_f3"],
@@ -314,8 +318,14 @@ const E_TYPES = {
   orc_shaman: { anim: "orc_shaman", hp: 14, spd: 30, dmg: 7, xp: 3, r: 5, scale: 1, ranged: true, score: 3 },
   orc_berserker: { anim: "orc_berserker", hp: 30, spd: 40, dmg: 11, xp: 4, r: 5, scale: 1, rage: true, score: 4 },
   ogre: { anim: "ogre", hp: 150, spd: 22, dmg: 18, xp: 12, r: 10, scale: 1, big: true, score: 10 },
-  warchief: { anim: "warchief", hp: 750, spd: 30, dmg: 22, xp: 40, r: 9, scale: 2, boss: true, big: true, score: 50 },
+  warchief: { anim: "warchief", hp: 750, spd: 30, dmg: 22, xp: 40, r: 9, scale: 2, boss: true, bossBar: true, big: true, score: 50 },
+  orc_butcher: { anim: "butcher", hp: 300, spd: 32, dmg: 20, xp: 20, r: 10, scale: 2, big: true, bossBar: true, charge: true, score: 30 },
+  orc_shamanking: { anim: "shamanking", hp: 340, spd: 26, dmg: 10, xp: 25, r: 8, scale: 2, big: true, bossBar: true, ranged: true, king: true, score: 40 },
 };
+
+const BOSS_CYCLE = ["orc_butcher", "warchief", "orc_shamanking"];
+const BOSS_NAMES = { orc_butcher: "THE BUTCHER", warchief: "THE WARCHIEF", orc_shamanking: "THE SHAMAN KING" };
+const bossFor = w => BOSS_CYCLE[(Math.floor(w / 5) - 1 + BOSS_CYCLE.length) % BOSS_CYCLE.length];
 
 function waveComposition(w) {
   const list = [];
@@ -329,10 +339,10 @@ function waveComposition(w) {
   if (w >= 5) add("frost_orc", Math.floor(w / 2) - 1);
   if (w >= 6) add("orc_general", Math.floor(w / 3));
   if (w >= 7) add("night_orc", w - 5);
+  if (w >= 8) add("ogre", Math.floor(w / 8));
   if (w >= 9) add("blood_general", Math.floor(w / 4));
-  if (w >= 5 && w % 5 === 0 && w !== FINAL_WAVE) add("ogre", Math.floor(w / 5));
-  if (w === FINAL_WAVE) { add("warchief", 1); add("ogre", 1); add("blood_general", 2); }
-  if (w > FINAL_WAVE) { add("ogre", Math.floor(w / 4)); add("orc_berserker", w - 4); add("blood_general", Math.floor(w / 4)); add("night_orc", w - 6); }
+  if (w % 5 === 0) add(bossFor(w), 1); // a boss every 5th wave
+  if (w > FINAL_WAVE) { add("orc_berserker", w - 8); add("night_orc", w - 8); }
   return list;
 }
 
@@ -340,12 +350,13 @@ function startWave(w) {
   G.wave = w;
   const comp = waveComposition(w);
   // bosses/bigs first, rest shuffled, all spread over a fixed wave window
-  comp.sort((a, b) => (E_TYPES[b.type || b].boss ? 1 : 0) - (E_TYPES[a.type || a].boss ? 1 : 0) || Math.random() - 0.5);
+  comp.sort((a, b) => (E_TYPES[b].bossBar ? 1 : 0) - (E_TYPES[a].bossBar ? 1 : 0) || Math.random() - 0.5);
   const waveDur = clamp(6 + w * 1.2, 8, 20);
   spawnQueue = comp.map((type, i) => ({ type, at: 1 + (i / comp.length) * waveDur + rnd(0, 0.3) }));
   spawnTimer = 0;
-  texts.push({ x: player.x, y: player.y - 40, s: w === FINAL_WAVE ? "THE WARCHIEF COMES" : "WAVE " + w, life: 2.2, col: "#ffd166", big: true });
-  if (w === FINAL_WAVE) SFX.bossRoar();
+  const bossWave = w % 5 === 0;
+  texts.push({ x: player.x, y: player.y - 40, s: bossWave ? `${BOSS_NAMES[bossFor(w)]} COMES` : "WAVE " + w, life: 2.2, col: bossWave ? "#ff6b6b" : "#ffd166", big: true });
+  if (bossWave) SFX.bossRoar();
   if (w >= 10 && (!UN.scythe || !UN.reaper)) {
     UN.scythe = true; UN.reaper = true; saveUnlocks();
     texts.push({ x: player.x, y: player.y - 56, s: "SCYTHE & REAPER UNLOCKED!", life: 3, col: "#b48cff", big: true });
@@ -377,9 +388,10 @@ function spawnEnemy(type) {
     spd: t.spd * (1 + 0.02 * (G.wave - 1)) * rnd(0.9, 1.1),
     dmg: t.dmg * (1 + 0.06 * (G.wave - 1)),
     xp: t.xp, ranged: !!t.ranged, rage: !!t.rage, big: !!t.big, boss: !!t.boss,
+    bossBar: !!t.bossBar, charge: !!t.charge, king: !!t.king,
     score: t.score,
     atkCd: rnd(0, 1), animT: rnd(0, 9), facing: 1, hitFlash: 0, warmup: 0.8,
-    summonCd: 6, strafe: rnd(0, Math.PI * 2),
+    summonCd: 6, strafe: rnd(0, Math.PI * 2), chargeCd: 4, chargeT: 0,
   });
   fx.push({ kind: "spawn", x: p.x, y: p.y, life: 0.8, max: 0.8 });
 }
@@ -680,6 +692,15 @@ function updatePlay(dt) {
     const dToP = dist(e, player);
     let sp = e.spd;
     if (e.rage && e.hp < e.maxHp * 0.5) sp *= 1.7;
+    if (e.charge) { // butcher: telegraphed bull-rush
+      e.chargeCd -= dt;
+      if (e.chargeCd <= 0 && dToP > 40) {
+        e.chargeCd = 5; e.chargeT = 1.0;
+        texts.push({ x: e.x, y: e.y - 42, s: "!", life: 0.8, col: "#ff6b6b", big: true });
+        SFX.bossRoar();
+      }
+      if (e.chargeT > 0) { e.chargeT -= dt; sp *= 3.1; }
+    }
     let tx = player.x - e.x, ty = player.y - e.y;
     if (e.ranged) {
       // shamans hover at range and lob bolts
@@ -688,10 +709,14 @@ function updatePlay(dt) {
       if (dToP < want - 15) { tx = -tx; ty = -ty; }
       else if (dToP < want + 25) { tx = Math.cos(e.strafe) * 40; ty = Math.sin(e.strafe) * 40; }
       e.atkCd -= dt;
-      if (e.atkCd <= 0 && dToP < 190) {
-        e.atkCd = rnd(2.2, 3.2);
+      if (e.atkCd <= 0 && dToP < (e.king ? 230 : 190)) {
+        e.atkCd = e.king ? 3.6 : rnd(2.2, 3.2);
         const a = Math.atan2(player.y - e.y, player.x - e.x);
-        bolts.push({ x: e.x, y: e.y - 8, vx: Math.cos(a) * 95, vy: Math.sin(a) * 95, t: 0, dmg: e.dmg });
+        const n = e.king ? 5 : 1; // shaman king fires a fan
+        for (let i = 0; i < n; i++) {
+          const off = (i - (n - 1) / 2) * 0.26;
+          bolts.push({ x: e.x, y: e.y - 8, vx: Math.cos(a + off) * 95, vy: Math.sin(a + off) * 95, t: 0, dmg: e.dmg });
+        }
       }
     }
     if (e.boss) {
@@ -805,7 +830,7 @@ function updatePlay(dt) {
 
   // -- wave end
   if (!spawnQueue.length && enemies.length === 0) {
-    if (G.wave >= FINAL_WAVE && !G.endless) {
+    if (G.wave === FINAL_WAVE && !G.endless) {
       // victory is triggered on boss kill; safety net:
       G.state = "victory";
     } else {
@@ -1031,7 +1056,7 @@ function drawEnemy(e) {
     const w = e.big ? 26 : 12, h = 2;
     const top = e.y + 4 - (IMG[list[0]].height * e.scale) * (e.dirAnim ? 0.75 : 1) - 4;
     ctx.fillStyle = "#1a1420"; ctx.fillRect(Math.round(e.x - w / 2), Math.round(top), w, h);
-    ctx.fillStyle = e.boss ? "#ff4d4d" : "#7bd88f";
+    ctx.fillStyle = e.bossBar ? "#ff4d4d" : "#7bd88f";
     ctx.fillRect(Math.round(e.x - w / 2), Math.round(top), Math.round(w * e.hp / e.maxHp), h);
   }
 }
@@ -1396,7 +1421,8 @@ function renderTitle(t) {
     ["goblin_run", true, 1], ["cp_orc1_run_l", false, 1], ["orc_shaman_run", true, 1],
     ["cp_orc3_run_l", false, 1], ["orc_berserker_run", true, 1], ["cp_frost_run_l", false, 1],
     ["masked_orc_run", true, 1], ["cp_orc2_run_l", false, 1], ["cp_night_run_l", false, 1],
-    ["ogre_run", true, 1], ["cp_blood_run_l", false, 1], ["warchief_run", true, 1.5],
+    ["ogre_run", true, 1], ["butcher_run", true, 1.3], ["cp_blood_run_l", false, 1],
+    ["shamanking_run", true, 1.3], ["warchief_run", true, 1.5],
   ];
   const span = VW - 130 + 60;
   for (let i = 0; i < MARCH.length; i++) {

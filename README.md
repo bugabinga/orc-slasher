@@ -41,8 +41,13 @@ between waves. Survive to wave 10 and slay the **Orc Warchief**.
 | Orc general | armored elite (CraftPix) |
 | Night stalker | very fast ambusher (purple variant) |
 | Blood general | heavy red-armor elite (late waves) |
-| Ogre | tanky miniboss every 5 waves |
+| Ogre | tanky elite in late waves |
+| **Orc Butcher** | wave-5 boss: telegraphed bull-rush charges (original sprite) |
 | **Orc Warchief** | wave-10 boss, summons goblins (original sprite) |
+| **Orc Shaman King** | wave-15 boss: 5-bolt fan volleys (original sprite) |
+
+A boss arrives every 5th wave; past wave 15 the cycle repeats with scaled
+stats (butcher → warchief → shaman king).
 
 Between waves you rest at a campfire and pick 1 card per level gained
 (damage, attack speed, lifesteal, crit, regen, …, 12 upgrades). The gold
