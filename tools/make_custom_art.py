@@ -641,6 +641,22 @@ save_grid("weapon_molotov", """
 ..KKKK..
 """, MOL_PAL)
 
+# ---------------------------------------------------------- ui key icon ----
+KEY_PAL = {
+    "K": (24, 18, 26, 255),
+    "Y": (226, 180, 62, 255),
+    "y": (168, 128, 44, 255),
+}
+save_grid("ui_key", """
+.KKKK.......
+KYYYYK......
+KY..YKKKKKKK
+KY..YYYYYYYK
+KYYYYKKYKYKK
+.KKKK..KyKy.
+........K.K.
+""", KEY_PAL)
+
 # ---------------------------------------------------------- upgrade card ---
 # 44x60 parchment card with gold pixel corners, used by the level-up UI.
 card = Image.new("RGBA", (44, 60), (0, 0, 0, 0))

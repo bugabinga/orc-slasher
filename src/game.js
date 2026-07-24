@@ -108,6 +108,14 @@ const keys = {};
 window.addEventListener("keydown", e => {
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
+  if (passModal.open) {
+    if (e.code === "Enter") submitPassword();
+    else if (e.code === "Escape") { passModal.open = false; passModal.input = ""; }
+    else if (e.code === "Backspace") passModal.input = passModal.input.slice(0, -1);
+    else if (e.key && e.key.length === 1 && passModal.input.length < 24) passModal.input += e.key;
+    e.preventDefault();
+    return;
+  }
   if (G.state !== "play") devFeedKey(e.key);
   handleKey(e.code);
 });
@@ -281,6 +289,23 @@ function isUnlocked(key) { return DEV.on || !key || UN[key]; }
 const DEV = { on: false, buf: "", HASH: 855446522, LEN: 10 };
 try { DEV.on = localStorage.getItem("orcslasher_dev") === "1"; } catch (e) { /* no storage */ }
 function djb2(s) { let h = 5381; for (const c of s) { h = (((h << 5) + h) ^ c.charCodeAt(0)) >>> 0; } return h; }
+// password prompt opened by the key button in the menu corner
+const passModal = { open: false, input: "", errT: 0 };
+let keyBtnRect = null;
+
+function submitPassword() {
+  if (passModal.input.length === DEV.LEN && djb2(passModal.input.toLowerCase()) === DEV.HASH) {
+    passModal.open = false; passModal.input = "";
+    DEV.on = true;
+    try { localStorage.setItem("orcslasher_dev", "1"); } catch (e) { /* no storage */ }
+    SFX.level();
+  } else {
+    passModal.input = "";
+    passModal.errT = 1.2;
+    SFX.hurt();
+  }
+}
+
 function devFeedKey(k) {
   if (!k || k.length !== 1) return;
   DEV.buf = (DEV.buf + k.toLowerCase()).slice(-24);
@@ -1286,6 +1311,42 @@ function wrapText(text, x, y, maxW, lh) {
   ctx.fillText(line, x, yy);
 }
 
+// key button + password modal ------------------------------------------------
+function drawKeyButton() {
+  keyBtnRect = { x: VW - 28, y: 6, w: 22, h: 20 };
+  const r = keyBtnRect;
+  ctx.fillStyle = DEV.on ? "rgba(180,140,255,0.18)" : "rgba(36,28,46,0.9)";
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = DEV.on ? "#b48cff" : "#57506b"; ctx.lineWidth = 1;
+  ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  const im = IMG.ui_key;
+  if (im && im.complete) ctx.drawImage(im, r.x + 5, r.y + 6);
+}
+
+function renderPassModal(dt) {
+  ctx.fillStyle = "rgba(7,5,16,0.75)"; ctx.fillRect(0, 0, VW, VH);
+  const pw2 = 220, ph2 = 84, px = VW / 2 - pw2 / 2, py = VH / 2 - ph2 / 2;
+  ctx.fillStyle = "#181322"; ctx.fillRect(px, py, pw2, ph2);
+  ctx.strokeStyle = "#8a6a30"; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, pw2 - 1, ph2 - 1);
+  const im = IMG.ui_key;
+  if (im && im.complete) ctx.drawImage(im, px + 8, py + 8);
+  ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd166";
+  ctx.fillText("DEVELOPER ACCESS", VW / 2 + 6, py + 16);
+  // masked input
+  ctx.fillStyle = "#241c2e"; ctx.fillRect(px + 20, py + 28, pw2 - 40, 18);
+  ctx.strokeStyle = "#57506b"; ctx.strokeRect(px + 20.5, py + 28.5, pw2 - 41, 17);
+  ctx.font = "bold 10px monospace"; ctx.fillStyle = "#e8dfc8";
+  const dots = "*".repeat(passModal.input.length) + (Math.floor(performance.now() / 400) % 2 ? "_" : " ");
+  ctx.fillText(dots, VW / 2, py + 41);
+  if (passModal.errT > 0) {
+    passModal.errT -= dt;
+    ctx.font = "7px monospace"; ctx.fillStyle = "#ff6b6b";
+    ctx.fillText("wrong password", VW / 2, py + 58);
+  }
+  ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
+  ctx.fillText("ENTER confirm · ESC cancel", VW / 2, py + ph2 - 8);
+}
+
 // class select ---------------------------------------------------------------
 let clsRects = [];
 function renderClassSelect(t) {
@@ -1325,6 +1386,7 @@ function renderClassSelect(t) {
   }
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
   ctx.fillText(`click or press 1-${ids.length}`, VW / 2, VH - 12);
+  drawKeyButton();
 }
 
 // weapon select --------------------------------------------------------------
@@ -1373,6 +1435,7 @@ function renderSelect(t) {
   ctx.textAlign = "center";
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
   ctx.fillText(`${CLASSES[G.cls].name}'s arsenal — click or press 1-${ids.length}`, VW / 2, VH - 10);
+  drawKeyButton();
 }
 
 // title / end screens -------------------------------------------------------
@@ -1459,6 +1522,7 @@ function renderTitle(t) {
   const blink = (Math.sin(t * 4) + 1) / 2;
   ctx.fillStyle = `rgba(255,${209 + blink * 40},${102 + blink * 140},${0.6 + blink * 0.4})`;
   ctx.fillText("PRESS ENTER / TAP TO SLAY", VW / 2, 138);
+  drawKeyButton();
 }
 
 function renderEnd(victory, t) {
@@ -1516,6 +1580,19 @@ function handleKey(code) {
 
 function handleClick(x, y) {
   audio();
+  if (passModal.open) return true; // modal swallows clicks; ESC/ENTER to leave
+  if (["title", "cls", "select"].includes(G.state) && keyBtnRect &&
+      x >= keyBtnRect.x - 3 && x <= keyBtnRect.x + keyBtnRect.w + 3 &&
+      y >= keyBtnRect.y - 3 && y <= keyBtnRect.y + keyBtnRect.h + 3) {
+    if (DEV.on) {
+      DEV.on = false;
+      try { localStorage.setItem("orcslasher_dev", "0"); } catch (e) { /* no storage */ }
+      SFX.card();
+    } else {
+      passModal.open = true; passModal.input = ""; passModal.errT = 0;
+    }
+    return true;
+  }
   if (G.state === "title") { G.state = "cls"; return true; }
   if (G.state === "cls") {
     for (const r of clsRects) {
@@ -1590,6 +1667,12 @@ function frame(now) {
   }
   else if (G.state === "campfire") renderCampfire(dt);
   else if (G.state === "gameover" || G.state === "victory") { renderWorld(); renderHUD(); renderEnd(G.state === "victory", now / 1000); }
+
+  // password modal over the menus
+  if (passModal.open) {
+    if (!["title", "cls", "select"].includes(G.state)) { passModal.open = false; }
+    else renderPassModal(dt);
+  }
 
   // dev mode badge
   if (DEV.on) {
