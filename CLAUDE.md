@@ -53,7 +53,9 @@ src/game.js` before building.
 - **E_TYPES / waveComposition / BOSS_CYCLE** — enemy stats & spawn tables;
   every 5th wave adds `bossFor(w)` (butcher → warchief → shamanking);
   warchief kill at wave 10 = victory, then endless
-- **CARD_POOL / campfire / shop** — pick 1-of-3 per banked level; shop
+- **CARD_POOL / RARITY / campfire / shop** — cards have rarities rolled
+  by `rollRarity(luck)`; pick 1-of-3 per banked level; `META.wpn` weapon
+  levels bought via `tryUpgradeWeapon` on the select screen; shop
   spends `G.coins` (reroll/heal/extra pick), leave via NEXT WAVE
 - **States**: title → credits (optional) → cls → select → play ⇄ campfire
   → gameover/victory. All input goes through `handleKey` / `handleClick`

@@ -362,8 +362,14 @@ CLASSES.nun.price = 300;
 
 // persistent gold bank — coins left at the end of a run are deposited here
 // and spent on unlocking classes
-const META = { gold: 0 };
+const META = { gold: 0, wpn: {} };
 try { Object.assign(META, JSON.parse(localStorage.getItem("orcslasher_meta") || "{}")); } catch (e) { /* no storage */ }
+META.wpn = META.wpn || {};
+
+// permanent weapon upgrades bought on the weapon-select screen
+const WPN_MAX_LV = 5;
+const wpnLevel = id => META.wpn[id] || 0;
+const wpnUpCost = id => 40 + wpnLevel(id) * 60; // 40, 100, 160, 220, 280
 function saveMeta() { try { localStorage.setItem("orcslasher_meta", JSON.stringify(META)); } catch (e) { /* no storage */ } }
 function bankCoins() {
   if (G.bankedRun || !G.coins) return;
@@ -442,10 +448,12 @@ function devFeedKey(k) {
 function baseStats(weaponId) {
   const w = WEAPONS[weaponId];
   return {
-    maxHp: 60, dmg: w.dmg, atkSpd: w.atkSpd, moveSpd: weaponId === "knives" ? 93 : 85,
+    maxHp: 60, dmg: w.dmg * (1 + 0.08 * wpnLevel(weaponId)), atkSpd: w.atkSpd,
+    moveSpd: weaponId === "knives" ? 93 : 85,
     range: w.range, arc: w.arc,
     crit: 0.05, regen: 0, magnet: 28, xpGain: 1,
     armor: 0, lifesteal: 0,
+    knock: 1, giant: 0, goldDig: 0, wind: 0, luck: 0,
   };
 }
 
@@ -563,29 +571,72 @@ function spawnEnemy(type) {
 }
 
 // ------------------------------------------------------------------ cards --
+const RARITY = {
+  common: { name: "COMMON", col: "#cfc6de", w: 60 },
+  rare: { name: "RARE", col: "#5ab0ff", w: 27 },
+  epic: { name: "EPIC", col: "#b48cff", w: 10 },
+  legendary: { name: "LEGENDARY", col: "#ffd166", w: 3 },
+};
+
 const CARD_POOL = [
-  { id: "dmg", name: "Sharpened Edge", desc: "+10% damage", icon: "weapon_waraxe", max: 7, apply: s => s.dmg *= 1.10 },
-  { id: "spd", name: "Battle Rage", desc: "+8% attack speed", icon: "slash_f1", max: 7, apply: s => s.atkSpd *= 1.08 },
-  { id: "mov", name: "Swift Boots", desc: "+6% move speed", icon: "flask_big_green", max: 5, apply: s => s.moveSpd *= 1.06 },
-  { id: "hp", name: "Orcish Vigor", desc: "+12% max HP, heal 10", icon: "flask_big_red", max: 7, apply: s => { s.maxHp = Math.round(s.maxHp * 1.12); player.hp = Math.min(s.maxHp, player.hp + 10); } },
-  { id: "reg", name: "Campfire Warmth", desc: "+0.5 HP/s regen", icon: "campfire_f0", max: 5, apply: s => s.regen += 0.5 },
-  { id: "cry", name: "War Cry", desc: "+6% damage, +4% attack speed", icon: "weapon_throwing_axe", max: 5, apply: s => { s.dmg *= 1.06; s.atkSpd *= 1.04; } },
-  { id: "crit", name: "Keen Eye", desc: "+6% crit chance (2x)", icon: "weapon_anime_sword", max: 5, apply: s => s.crit += 0.06 },
-  { id: "mag", name: "Greedy Hands", desc: "+30% pickup range", icon: "coin_f0", max: 4, apply: s => s.magnet *= 1.30 },
-  { id: "xp", name: "Trophy Hunter", desc: "+15% XP gained", icon: "xp_gem_f0", max: 4, apply: s => s.xpGain *= 1.15 },
-  { id: "rng", name: "Long Arms", desc: "+10% slash range", icon: "slash_f0", max: 3, apply: s => s.range *= 1.10 },
-  { id: "vamp", name: "Blood Pact", desc: "2% lifesteal", icon: "skull", max: 4, apply: s => s.lifesteal += 0.02 },
-  { id: "arm", name: "Iron Hide", desc: "-8% damage taken", icon: "crate", max: 5, apply: s => s.armor = 1 - (1 - s.armor) * 0.92 },
+  // common
+  { id: "dmg", r: "common", name: "Sharpened Edge", desc: "+10% damage", icon: "weapon_waraxe", max: 7, apply: s => s.dmg *= 1.10 },
+  { id: "mov", r: "common", name: "Swift Boots", desc: "+6% move speed", icon: "flask_big_green", max: 5, apply: s => s.moveSpd *= 1.06 },
+  { id: "hp", r: "common", name: "Orcish Vigor", desc: "+12% max HP, heal 10", icon: "flask_big_red", max: 7, apply: s => { s.maxHp = Math.round(s.maxHp * 1.12); player.hp = Math.min(s.maxHp, player.hp + 10); } },
+  { id: "stone", r: "common", name: "Stone Skin", desc: "+16 max HP", icon: "wall_mid", max: 5, apply: s => s.maxHp += 16 },
+  { id: "knock", r: "common", name: "Heavy Blows", desc: "+35% knockback", icon: "weapon_mace", max: 4, apply: s => s.knock *= 1.35 },
+  { id: "mag", r: "common", name: "Greedy Hands", desc: "+30% pickup range", icon: "coin_f0", max: 4, apply: s => s.magnet *= 1.30 },
+  // rare
+  { id: "spd", r: "rare", name: "Battle Rage", desc: "+8% attack speed", icon: "slash_f1", max: 7, apply: s => s.atkSpd *= 1.08 },
+  { id: "reg", r: "rare", name: "Campfire Warmth", desc: "+0.5 HP/s regen", icon: "campfire_f0", max: 5, apply: s => s.regen += 0.5 },
+  { id: "cry", r: "rare", name: "War Cry", desc: "+6% damage, +4% attack speed", icon: "weapon_throwing_axe", max: 5, apply: s => { s.dmg *= 1.06; s.atkSpd *= 1.04; } },
+  { id: "xp", r: "rare", name: "Trophy Hunter", desc: "+15% XP gained", icon: "xp_gem_f0", max: 4, apply: s => s.xpGain *= 1.15 },
+  { id: "rng", r: "rare", name: "Long Arms", desc: "+10% attack range", icon: "slash_f0", max: 3, apply: s => s.range *= 1.10 },
+  { id: "gold", r: "rare", name: "Gold Digger", desc: "+35% coin drops", icon: "coin_f2", max: 3, apply: s => s.goldDig += 0.35 },
+  // epic
+  { id: "crit", r: "epic", name: "Keen Eye", desc: "+6% crit chance (2x)", icon: "weapon_anime_sword", max: 5, apply: s => s.crit += 0.06 },
+  { id: "arm", r: "epic", name: "Iron Hide", desc: "-8% damage taken", icon: "crate", max: 5, apply: s => s.armor = 1 - (1 - s.armor) * 0.92 },
+  { id: "vamp", r: "epic", name: "Blood Pact", desc: "2% lifesteal", icon: "skull", max: 4, apply: s => s.lifesteal += 0.02 },
+  { id: "giant", r: "epic", name: "Giant Slayer", desc: "+20% damage vs big orcs", icon: "weapon_hammer", max: 3, apply: s => s.giant += 0.20 },
+  { id: "wind", r: "epic", name: "Second Wind", desc: "+15% campfire healing", icon: "campfire_f2", max: 3, apply: s => s.wind += 0.15 },
+  { id: "luck", r: "epic", name: "Lucky Charm", desc: "rarer cards appear more often", icon: "flask_big_yellow", max: 3, apply: s => s.luck += 0.5 },
+  // legendary
+  { id: "ldmg", r: "legendary", name: "Warlord's Edge", desc: "+25% damage", icon: "weapon_golden_sword", max: 3, apply: s => s.dmg *= 1.25 },
+  { id: "lspd", r: "legendary", name: "Bloodlust", desc: "+20% attack speed", icon: "weapon_saw_sword", max: 3, apply: s => s.atkSpd *= 1.20 },
+  { id: "lvamp", r: "legendary", name: "Vampire Lord", desc: "+5% lifesteal", icon: "skull", max: 2, apply: s => s.lifesteal += 0.05 },
+  { id: "lcrit", r: "legendary", name: "Deathmark", desc: "+15% crit chance", icon: "weapon_katana", max: 2, apply: s => s.crit += 0.15 },
 ];
 let cardCounts = {};
+
+function rollRarity(luck) {
+  // luck (from Lucky Charm) shifts weight away from common toward the top
+  const w = {
+    common: RARITY.common.w / (1 + luck),
+    rare: RARITY.rare.w * (1 + luck * 0.4),
+    epic: RARITY.epic.w * (1 + luck * 0.8),
+    legendary: RARITY.legendary.w * (1 + luck * 1.5),
+  };
+  let roll = Math.random() * (w.common + w.rare + w.epic + w.legendary);
+  for (const r of ["common", "rare", "epic", "legendary"]) {
+    if ((roll -= w[r]) <= 0) return r;
+  }
+  return "common";
+}
 
 function drawThreeCards() {
   const avail = CARD_POOL.filter(c => (cardCounts[c.id] || 0) < c.max);
   const opts = [];
-  const poolCopy = [...avail];
-  while (opts.length < 3 && poolCopy.length) {
-    const i = Math.floor(Math.random() * poolCopy.length);
-    opts.push(poolCopy.splice(i, 1)[0]);
+  const order = ["common", "rare", "epic", "legendary"];
+  for (let slot = 0; slot < 3 && avail.length; slot++) {
+    let r = rollRarity(player ? player.stats.luck : 0);
+    let pool = [];
+    // fall back down the rarity ladder if that tier is exhausted
+    for (let ri = order.indexOf(r); ri >= 0 && !pool.length; ri--) {
+      pool = avail.filter(c => c.r === order[ri] && !opts.includes(c));
+    }
+    if (!pool.length) pool = avail.filter(c => !opts.includes(c));
+    if (!pool.length) break;
+    opts.push(pick(pool));
   }
   return opts;
 }
@@ -593,7 +644,7 @@ function drawThreeCards() {
 function enterCampfire() {
   G.state = "campfire";
   G.coins += 25; // wave bounty
-  player.hp = Math.min(player.stats.maxHp, player.hp + Math.round((player.stats.maxHp - player.hp) * 0.4));
+  player.hp = Math.min(player.stats.maxHp, player.hp + Math.round((player.stats.maxHp - player.hp) * (0.4 + player.stats.wind)));
   campfire = {
     t: 0,
     picksLeft: Math.max(1, player.banked), // always at least one card by the fire
@@ -665,6 +716,7 @@ function nearestEnemy(from, maxD = 1e9) {
 }
 
 function damageEnemy(e, dmg, crit) {
+  if (e.big && player.stats.giant) dmg *= 1 + player.stats.giant;
   e.hp -= dmg;
   e.hitFlash = 0.1;
   texts.push({ x: e.x + rnd(-4, 4), y: e.y - 14 * e.scale, s: String(Math.round(dmg)), life: 0.6, col: crit ? "#ffd166" : "#fff" });
@@ -687,7 +739,7 @@ function killEnemy(e) {
   for (let i = 0; i < gemCount; i++) {
     gems.push({ x: e.x + rnd(-8, 8), y: e.y + rnd(-6, 6), v: e.xp / gemCount, t: rnd(0, 9), vx: rnd(-30, 30), vy: rnd(-60, -20) });
   }
-  const coinCount = e.big ? 3 : (Math.random() < 0.3 ? 1 : 0);
+  const coinCount = e.big ? 3 : (Math.random() < 0.3 * (1 + player.stats.goldDig) ? 1 : 0);
   for (let i = 0; i < coinCount; i++) coins.push({ x: e.x + rnd(-6, 6), y: e.y + rnd(-4, 4), t: rnd(0, 9), vx: rnd(-25, 25), vy: rnd(-50, -20) });
   if (Math.random() < (e.big ? 0.8 : 0.04)) flasks.push({ x: e.x, y: e.y, t: 0 });
   if (e.big && Math.random() < 0.001) { // 0.1% relic drop from bosses
@@ -730,7 +782,7 @@ function playerMeleeAttack() {
       const crit = Math.random() < st.crit;
       damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
       // knockback
-      e.x += Math.cos(ea) * 6; e.y += Math.sin(ea) * 6;
+      e.x += Math.cos(ea) * 6 * st.knock; e.y += Math.sin(ea) * 6 * st.knock;
     }
   }
 }
@@ -802,7 +854,7 @@ function castSpell(id) {
       const d = dist(e, player);
       if (d < 62 + e.r) {
         const a = Math.atan2(e.y - player.y, e.x - player.x);
-        e.x += Math.cos(a) * 34; e.y += Math.sin(a) * 34;
+        e.x += Math.cos(a) * 34 * st.knock; e.y += Math.sin(a) * 34 * st.knock;
         damageEnemy(e, st.dmg * 0.8 * rnd(0.9, 1.1), false);
       }
     }
@@ -1631,31 +1683,42 @@ function renderCampfire(dt) {
   cardRects = []; nextRect = null;
   if (campfire.picksLeft > 0) {
     const n = campfire.cards.length;
-    const cw = 88, chh = 116, gap = 18;
+    const cw = 122, chh = 128, gap = 12;
     const total = n * cw + (n - 1) * gap;
     for (let i = 0; i < n; i++) {
-      const x = VW / 2 - total / 2 + i * (cw + gap), y = 104;
+      const x = VW / 2 - total / 2 + i * (cw + gap), y = 100;
       cardRects.push({ x, y, w: cw, h: chh, i });
       const c = campfire.cards[i];
+      const rar = RARITY[c.r];
       const hov = campfire.chosen === i;
       ctx.save();
       if (hov) ctx.translate(0, -5);
-      ctx.drawImage(IMG.card, x, y, cw, chh);
-      if (hov) { ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2; ctx.strokeRect(x - 1, y - 1, cw + 2, chh + 2); }
+      // dark panel, rarity-colored frame — light-on-dark for readability
+      ctx.fillStyle = "#1c1626";
+      ctx.fillRect(x, y, cw, chh);
+      ctx.strokeStyle = rar.col; ctx.lineWidth = hov ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, cw - 1, chh - 1);
+      ctx.fillStyle = rar.col; ctx.globalAlpha = 0.12;
+      ctx.fillRect(x + 1, y + 1, cw - 2, 20);
+      ctx.globalAlpha = 1;
+      ctx.font = "bold 7px monospace"; ctx.textAlign = "left"; ctx.fillStyle = rar.col;
+      ctx.fillText(rar.name, x + 6, y + 13);
+      ctx.textAlign = "right"; ctx.fillStyle = "#8f84a8";
+      ctx.fillText(`[${i + 1}]`, x + cw - 6, y + 13);
       const icon = IMG[c.icon];
       if (icon && icon.complete) {
-        const s = Math.min(3, 44 / icon.height);
-        const ih = icon.height * s;
-        ctx.drawImage(icon, Math.round(x + cw / 2 - icon.width * s / 2), Math.round(y + 12 + (48 - ih) / 2), Math.round(icon.width * s), Math.round(ih));
+        const s = Math.min(2.4, 34 / icon.height);
+        ctx.drawImage(icon, Math.round(x + cw / 2 - icon.width * s / 2), Math.round(y + 26 + (38 - icon.height * s) / 2), Math.round(icon.width * s), Math.round(icon.height * s));
       }
-      ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#3a2c18";
-      ctx.fillText(c.name, x + cw / 2, y + 74);
-      ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
-      wrapText(c.desc, x + cw / 2, y + 87, cw - 14, 9);
+      ctx.font = "bold 10px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffffff";
+      ctx.fillText(c.name, x + cw / 2, y + 80);
+      ctx.font = "8px monospace"; ctx.fillStyle = "#c9c0da";
+      wrapText(c.desc, x + cw / 2, y + 94, cw - 12, 10);
       const cnt = cardCounts[c.id] || 0;
-      if (cnt > 0) { ctx.fillStyle = "#8a6a30"; ctx.fillText(`owned ${cnt}/${c.max}`, x + cw / 2, y + 108); }
-      ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
-      ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 11);
+      if (cnt > 0) {
+        ctx.font = "7px monospace"; ctx.fillStyle = "#7bd88f";
+        ctx.fillText(`owned ${cnt}/${c.max}`, x + cw / 2, y + chh - 7);
+      }
       ctx.restore();
     }
   } else {
@@ -1916,10 +1979,26 @@ let clsRects = [], clsToast = null;
 
 function selectClass(id) {
   G.cls = id;
-  // monk swaps in-game, mage has only his spells — both skip weapon select
+  // the monk swaps weapons in-game via his inventory bar — no select screen
   if (id === "monk") newRun("sword");
-  else if (id === "mage") newRun("spells");
   else G.state = "select";
+}
+
+let selToast = null, upRects = [];
+function tryUpgradeWeapon(id) {
+  const lv = wpnLevel(id);
+  if (lv >= WPN_MAX_LV) { selToast = { s: `${WEAPONS[id].name} is already maxed`, t: 2 }; return; }
+  const cost = wpnUpCost(id);
+  if (META.gold < cost) {
+    selToast = { s: `upgrade costs ${cost} gold — you have ${META.gold}`, t: 2.2 };
+    SFX.hurt();
+    return;
+  }
+  META.gold -= cost;
+  META.wpn[id] = lv + 1;
+  saveMeta();
+  selToast = { s: `${WEAPONS[id].name} → LV ${lv + 1} (+8% damage)`, t: 2.2 };
+  SFX.level();
 }
 
 function tryBuyClass(id) {
@@ -2024,9 +2103,17 @@ function renderSelect(t) {
   ctx.fillText("CHOOSE YOUR WEAPON", VW / 2, 30);
   drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], t, 6), VW / 2, 66, false, PLAYER_SCALE);
 
-  selectRects = [];
+  // gold bank (spent on the upgrade buttons)
+  const cim = IMG.coin_f0;
+  if (cim && cim.complete) ctx.drawImage(cim, 10, 8);
+  ctx.textAlign = "left"; ctx.font = "bold 10px monospace"; ctx.fillStyle = "#ffd166";
+  ctx.fillText(`${META.gold}`, 24, 18);
+  ctx.font = "6px monospace"; ctx.fillStyle = "#6f6485";
+  ctx.fillText("your gold", 10, 27);
+
+  selectRects = []; upRects = [];
   const ids = CLASSES[G.cls].weapons;
-  const pw = 200, ph = 46, gapx = 16, gapy = 10;
+  const pw = 208, ph = 46, gapx = 16, gapy = 10;
   const cols = ids.length > 3 ? 2 : 1;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], w = WEAPONS[id];
@@ -2034,7 +2121,7 @@ function renderSelect(t) {
     const col = i % cols, row = Math.floor(i / cols);
     const x = cols === 1 ? VW / 2 - pw / 2 : VW / 2 - pw - gapx / 2 + col * (pw + gapx);
     const y = 80 + row * (ph + gapy);
-    selectRects.push({ x, y, w: pw, h: ph, id, unlocked });
+    selectRects.push({ x, y, w: pw - 48, h: ph, id, unlocked });
     ctx.fillStyle = unlocked ? "#241c2e" : "#161020";
     ctx.fillRect(x, y, pw, ph);
     ctx.strokeStyle = unlocked ? "#8a6a30" : "#3a3346"; ctx.lineWidth = 1;
@@ -2047,17 +2134,47 @@ function renderSelect(t) {
       if (id === "knives") ctx.drawImage(icon, Math.round(x + 28 - icon.width * s / 2), Math.round(y + ph / 2 - icon.height * s / 2), Math.round(icon.width * s), Math.round(icon.height * s));
       ctx.globalAlpha = 1;
     }
+    const lv = wpnLevel(id);
     ctx.textAlign = "left";
     ctx.font = "bold 8px monospace"; ctx.fillStyle = unlocked ? "#e8dfc8" : "#57506b";
-    ctx.fillText(`[${i + 1}] ${w.name}`, x + 40, y + 14);
+    ctx.fillText(`[${i + 1}] ${w.name}${lv > 0 ? ` LV${lv}` : ""}`, x + 40, y + 14);
     ctx.font = "7px monospace"; ctx.fillStyle = unlocked ? "#8f84a8" : "#453f58";
     ctx.fillText(unlocked ? w.desc : "locked — reach wave 10", x + 40, y + 26);
     ctx.fillStyle = unlocked ? "#ffd166" : "#453f58";
-    ctx.fillText(w.ranged ? `dmg ${w.dmg} · ${w.atkSpd}/s · ${w.clip} arrows` : `dmg ${w.dmg} · ${w.atkSpd}/s · reach ${w.range}`, x + 40, y + 38);
+    const dmgNow = Math.round(w.dmg * (1 + 0.08 * lv) * 10) / 10;
+    ctx.fillText(w.ranged ? `dmg ${dmgNow} · ${w.atkSpd}/s · ${w.clip} arrows` : `dmg ${dmgNow} · ${w.atkSpd}/s · reach ${w.range}`, x + 40, y + 38);
+    // upgrade button (persistent, costs banked gold, price climbs per level)
+    if (unlocked) {
+      const ur = { x: x + pw - 44, y: y + 4, w: 40, h: ph - 8, id };
+      upRects.push(ur);
+      const maxed = lv >= WPN_MAX_LV;
+      const cost = wpnUpCost(id);
+      const afford = !maxed && META.gold >= cost;
+      ctx.fillStyle = afford ? "#2e2438" : "#181322";
+      ctx.fillRect(ur.x, ur.y, ur.w, ur.h);
+      ctx.strokeStyle = afford ? "#ffd166" : "#3a3346";
+      ctx.strokeRect(ur.x + 0.5, ur.y + 0.5, ur.w - 1, ur.h - 1);
+      ctx.textAlign = "center";
+      ctx.font = "bold 7px monospace"; ctx.fillStyle = afford ? "#ffd166" : "#57506b";
+      if (maxed) ctx.fillText("MAX", ur.x + ur.w / 2, ur.y + ur.h / 2 + 3);
+      else {
+        ctx.fillText("+8% dmg", ur.x + ur.w / 2, ur.y + 14);
+        ctx.fillText(`${cost}g`, ur.x + ur.w / 2, ur.y + 26);
+      }
+      ctx.textAlign = "left";
+    }
+  }
+  if (selToast) {
+    selToast.t -= 1 / 60;
+    if (selToast.t <= 0) selToast = null;
+    else {
+      ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd166";
+      ctx.fillText(selToast.s, VW / 2, VH - 24);
+    }
   }
   ctx.textAlign = "center";
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText(`${CLASSES[G.cls].name}'s arsenal — click or press 1-${ids.length}`, VW / 2, VH - 10);
+  ctx.fillText(`${CLASSES[G.cls].name}'s arsenal — press 1-${ids.length} to fight · gold buttons upgrade forever`, VW / 2, VH - 10);
   drawKeyButton();
 }
 
@@ -2282,6 +2399,9 @@ function handleClick(x, y) {
     return true;
   }
   if (G.state === "select") {
+    for (const r of upRects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) { tryUpgradeWeapon(r.id); return true; }
+    }
     for (const r of selectRects) {
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h && r.unlocked) { newRun(r.id); return true; }
     }

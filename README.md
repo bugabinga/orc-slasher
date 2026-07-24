@@ -52,9 +52,13 @@ charging **Butcher**, the summoning **Warchief**, the bolt-spraying
 **Shaman King** — then the cycle repeats, meaner each time.
 
 Between waves you rest at a campfire: pick one upgrade card per level you
-gained (damage, attack speed, lifesteal, crit, regen…) and spend the gold
-orcs dropped at the shop — reroll the offer, buy a heal, buy an extra card.
-Leave for the next wave when you're ready.
+gained. Cards come in **common, rare, epic and legendary** rarities (Lucky
+Charm cards tilt the odds), from knockback and gold-finding to legendary
+powerhouses like Warlord's Edge. Spend run gold at the fire — reroll the
+offer, buy a heal, buy an extra card — and leave when you're ready.
+
+On the weapon screen, banked gold buys **permanent weapon upgrades**
+(+8% damage each, price climbing every level, max 5).
 
 Beat the Warchief and endless mode opens. How deep can you go?
 
