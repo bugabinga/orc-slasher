@@ -879,9 +879,9 @@ def cave_floor(i):
     for y in range(16):
         for x in range(16):
             v = random.random()
-            if v < 0.72: c = (57, 49, 46)
-            elif v < 0.92: c = (51, 44, 42)
-            else: c = (64, 55, 50)
+            if v < 0.72: c = (68, 59, 55)
+            elif v < 0.92: c = (61, 53, 50)
+            else: c = (77, 66, 60)
             px[x, y] = (*c, 255)
     for _ in range(2):  # cracks
         cx, cy = random.randint(1, 14), random.randint(1, 14)
@@ -890,7 +890,7 @@ def cave_floor(i):
             cx = max(0, min(15, cx + random.randint(-1, 1)))
             cy = max(0, min(15, cy + random.randint(-1, 1)))
     for _ in range(random.randint(2, 4)):  # pebbles
-        px[random.randint(0, 15), random.randint(0, 15)] = (76, 66, 58, 255)
+        px[random.randint(0, 15), random.randint(0, 15)] = (90, 78, 68, 255)
     img.save(os.path.join(OUT, f"cave_floor_{i}.png"))
 
 

@@ -1658,7 +1658,7 @@ function renderDarkness(cx, cy) {
   const dc = darkCanvas.getContext("2d");
   dc.globalCompositeOperation = "source-over";
   dc.clearRect(0, 0, VW, VH);
-  dc.fillStyle = "rgba(6,4,14,0.58)";
+  dc.fillStyle = "rgba(6,4,14,0.42)";
   dc.fillRect(0, 0, VW, VH);
   dc.globalCompositeOperation = "destination-out";
   const punch = (x, y, r, a) => {
