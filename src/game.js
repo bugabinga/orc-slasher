@@ -147,11 +147,10 @@ window.addEventListener("keydown", e => {
   keys[e.code] = true;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
   if (passModal.open) {
-    if (e.code === "Enter") submitPassword();
-    else if (e.code === "Escape") { passModal.open = false; passModal.input = ""; }
-    else if (e.code === "Backspace") passModal.input = passModal.input.slice(0, -1);
-    else if (e.key && e.key.length === 1 && passModal.input.length < 24) passModal.input += e.key;
-    e.preventDefault();
+    // the hidden input owns typing; here we only rescue focus and handle exits
+    if (e.code === "Escape") closePassModal();
+    else if (e.code === "Enter") submitPassword();
+    else if (document.activeElement !== devInput) devInput.focus();
     return;
   }
   if (G.state !== "play") devFeedKey(e.key);
@@ -173,6 +172,13 @@ function canvasPos(t) {
 canvas.addEventListener("pointerdown", e => {
   if (e.pointerType === "touch") usingTouch = true;
   const p = canvasPos(e);
+  if (passModal.open || (["title", "cls", "select"].includes(G.state) && keyBtnRect &&
+      p.x >= keyBtnRect.x - 3 && p.x <= keyBtnRect.x + keyBtnRect.w + 3 &&
+      p.y >= keyBtnRect.y - 3 && p.y <= keyBtnRect.y + keyBtnRect.h + 3)) {
+    e.preventDefault(); // keep focus on the hidden password input
+    handleClick(p.x, p.y);
+    return;
+  }
   if (G.state === "play" && usingTouch &&
       Math.hypot(p.x - DASH_BTN.x, p.y - DASH_BTN.y) < DASH_BTN.r + 6) {
     // dash toward joystick direction, or facing if standing still
@@ -327,18 +333,45 @@ function isUnlocked(key) { return DEV.on || !key || UN[key]; }
 const DEV = { on: false, buf: "", HASH: 855446522, LEN: 10 };
 try { DEV.on = localStorage.getItem("orcslasher_dev") === "1"; } catch (e) { /* no storage */ }
 function djb2(s) { let h = 5381; for (const c of s) { h = (((h << 5) + h) ^ c.charCodeAt(0)) >>> 0; } return h; }
-// password prompt opened by the key button in the menu corner
+// password prompt opened by the key button in the menu corner.
+// A hidden real <input> backs it so mobile devices get their native
+// on-screen keyboard; the canvas renders the masked value.
 const passModal = { open: false, input: "", errT: 0 };
 let keyBtnRect = null;
+let passRects = { box: null, ok: null, cancel: null };
 
+const devInput = document.createElement("input");
+devInput.type = "password";
+devInput.autocomplete = "off";
+devInput.autocapitalize = "none";
+devInput.spellcheck = false;
+devInput.style.cssText = "position:fixed;top:0;left:0;width:2px;height:2px;opacity:0.01;border:0;padding:0;background:none;";
+document.body.appendChild(devInput);
+devInput.addEventListener("input", () => { passModal.input = devInput.value; });
+devInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") { e.preventDefault(); submitPassword(); }
+  else if (e.key === "Escape") closePassModal();
+  e.stopPropagation(); // keep gameplay key handling out of the field
+});
+
+function openPassModal() {
+  passModal.open = true; passModal.input = ""; passModal.errT = 0;
+  devInput.value = "";
+  devInput.focus(); // synchronously, inside the tap gesture, so mobile keyboards open
+}
+function closePassModal() {
+  passModal.open = false; passModal.input = "";
+  devInput.value = "";
+  devInput.blur();
+}
 function submitPassword() {
   if (passModal.input.length === DEV.LEN && djb2(passModal.input.toLowerCase()) === DEV.HASH) {
-    passModal.open = false; passModal.input = "";
+    closePassModal();
     DEV.on = true;
     try { localStorage.setItem("orcslasher_dev", "1"); } catch (e) { /* no storage */ }
     SFX.level();
   } else {
-    passModal.input = "";
+    passModal.input = ""; devInput.value = "";
     passModal.errT = 1.2;
     SFX.hurt();
   }
@@ -1402,26 +1435,37 @@ function drawKeyButton() {
 
 function renderPassModal(dt) {
   ctx.fillStyle = "rgba(7,5,16,0.75)"; ctx.fillRect(0, 0, VW, VH);
-  const pw2 = 220, ph2 = 84, px = VW / 2 - pw2 / 2, py = VH / 2 - ph2 / 2;
+  const pw2 = 220, ph2 = 104, px = VW / 2 - pw2 / 2, py = VH / 2 - ph2 / 2 - 14;
   ctx.fillStyle = "#181322"; ctx.fillRect(px, py, pw2, ph2);
   ctx.strokeStyle = "#8a6a30"; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, pw2 - 1, ph2 - 1);
   const im = IMG.ui_key;
   if (im && im.complete) ctx.drawImage(im, px + 8, py + 8);
   ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd166";
   ctx.fillText("DEVELOPER ACCESS", VW / 2 + 6, py + 16);
-  // masked input
+  // masked input (tap to summon the keyboard)
+  passRects.box = { x: px + 20, y: py + 28, w: pw2 - 40, h: 18 };
   ctx.fillStyle = "#241c2e"; ctx.fillRect(px + 20, py + 28, pw2 - 40, 18);
-  ctx.strokeStyle = "#57506b"; ctx.strokeRect(px + 20.5, py + 28.5, pw2 - 41, 17);
+  ctx.strokeStyle = document.activeElement === devInput ? "#8a6a30" : "#57506b";
+  ctx.strokeRect(px + 20.5, py + 28.5, pw2 - 41, 17);
   ctx.font = "bold 10px monospace"; ctx.fillStyle = "#e8dfc8";
   const dots = "*".repeat(passModal.input.length) + (Math.floor(performance.now() / 400) % 2 ? "_" : " ");
   ctx.fillText(dots, VW / 2, py + 41);
   if (passModal.errT > 0) {
     passModal.errT -= dt;
     ctx.font = "7px monospace"; ctx.fillStyle = "#ff6b6b";
-    ctx.fillText("wrong password", VW / 2, py + 58);
+    ctx.fillText("wrong password", VW / 2, py + 56);
   }
-  ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText("ENTER confirm · ESC cancel", VW / 2, py + ph2 - 8);
+  // tappable buttons
+  const bw = 84, bh = 20;
+  passRects.cancel = { x: px + 18, y: py + ph2 - 30, w: bw, h: bh };
+  passRects.ok = { x: px + pw2 - 18 - bw, y: py + ph2 - 30, w: bw, h: bh };
+  for (const [r, label, hot] of [[passRects.cancel, "CANCEL", false], [passRects.ok, "CONFIRM", true]]) {
+    ctx.fillStyle = hot ? "#2e2438" : "#241c2e"; ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = hot ? "#ffd166" : "#57506b"; ctx.lineWidth = 1;
+    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    ctx.font = "bold 8px monospace"; ctx.fillStyle = hot ? "#ffd166" : "#8f84a8";
+    ctx.fillText(label, r.x + r.w / 2, r.y + 13);
+  }
 }
 
 // class select ---------------------------------------------------------------
@@ -1657,7 +1701,13 @@ function handleKey(code) {
 
 function handleClick(x, y) {
   audio();
-  if (passModal.open) return true; // modal swallows clicks; ESC/ENTER to leave
+  if (passModal.open) { // modal owns all clicks/taps
+    const hit = r => r && x >= r.x - 3 && x <= r.x + r.w + 3 && y >= r.y - 3 && y <= r.y + r.h + 3;
+    if (hit(passRects.ok)) submitPassword();
+    else if (hit(passRects.cancel)) closePassModal();
+    else if (hit(passRects.box)) devInput.focus(); // re-summon the keyboard
+    return true;
+  }
   if (["title", "cls", "select"].includes(G.state)) {
     for (const r of sndBtnRects) {
       if (x >= r.x - 3 && x <= r.x + r.w + 3 && y >= r.y - 3 && y <= r.y + r.h + 3) {
@@ -1676,7 +1726,7 @@ function handleClick(x, y) {
       try { localStorage.setItem("orcslasher_dev", "0"); } catch (e) { /* no storage */ }
       SFX.card();
     } else {
-      passModal.open = true; passModal.input = ""; passModal.errT = 0;
+      openPassModal();
     }
     return true;
   }
@@ -1757,7 +1807,7 @@ function frame(now) {
 
   // password modal over the menus
   if (passModal.open) {
-    if (!["title", "cls", "select"].includes(G.state)) { passModal.open = false; }
+    if (!["title", "cls", "select"].includes(G.state)) closePassModal();
     else renderPassModal(dt);
   }
 
