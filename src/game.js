@@ -325,7 +325,7 @@ const WEAPONS = {
   katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
   shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 5, atkSpd: 2.8, range: 125, arc: 0, star: true },
   spells: { name: "Arcane Arts", desc: "magic missile + fireball · shockwave · firebeam", sprite: "weapon_red_magic_staff", dmg: 10, atkSpd: 1, range: 165, arc: 0, spells: true },
-  blastdagger: { name: "Blast Dagger", desc: "thrown blade, arcane burst on impact", sprite: "weapon_blast_dagger", dmg: 8, atkSpd: 1.1, range: 130, arc: 0, blast: true },
+  blastdagger: { name: "Blast Dagger", desc: "thrown blade, arcane burst on impact", sprite: "weapon_blast_dagger", dmg: 10, atkSpd: 1.3, range: 140, arc: 0, blast: true },
 };
 
 const SPELLS = {
@@ -851,15 +851,15 @@ function explodeDagger(d) {
   beep(320, 0.14, "square", 0.07, -160);
   for (const e of [...enemies]) {
     if (e.warmup > 0) continue;
-    if (Math.hypot(e.x - d.x, e.y - d.y) < 26 + e.r) {
+    if (Math.hypot(e.x - d.x, e.y - d.y) < 30 + e.r) {
       const crit = Math.random() < st.crit;
       damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
     }
   }
-  for (let i = 0; i < 9; i++) {
-    fx.push({ kind: "spark", violet: true, x: d.x, y: d.y - 2, vx: rnd(-60, 60), vy: rnd(-70, -10), life: rnd(0.2, 0.45), max: 0.45 });
+  for (let i = 0; i < 11; i++) {
+    fx.push({ kind: "spark", violet: true, x: d.x, y: d.y - 2, vx: rnd(-70, 70), vy: rnd(-80, -10), life: rnd(0.2, 0.5), max: 0.5 });
   }
-  fx.push({ kind: "ring", x: d.x, y: d.y, life: 0.25, max: 0.25, r: 26, violet: true });
+  fx.push({ kind: "ring", x: d.x, y: d.y, life: 0.28, max: 0.28, r: 30, violet: true });
 }
 
 // the mage's normal attack: a small auto-fired magic missile, always ready
