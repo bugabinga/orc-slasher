@@ -44,7 +44,10 @@ between waves. Survive to wave 10 and slay the **Orc Warchief**.
 | **Orc Warchief** | wave-10 boss, summons goblins (original sprite) |
 
 Between waves you rest at a campfire and pick 1 card per level gained
-(damage, attack speed, lifesteal, crit, regen, …, 12 upgrades).
+(damage, attack speed, lifesteal, crit, regen, …, 12 upgrades). The gold
+that orcs drop is spent at the campfire shop: reroll the card offer (3g,
+price climbs per use), heal 50% (5g), or buy an extra card pick (10g+).
+Leave for the next wave whenever you're ready.
 After the Warchief falls: endless mode.
 
 ## Project layout

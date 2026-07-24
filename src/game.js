@@ -376,26 +376,58 @@ function enterCampfire() {
     picksLeft: Math.max(1, player.banked), // always at least one card by the fire
     cards: drawThreeCards(),
     chosen: -1,
+    rerollCost: 3, pickCost: 10,
+    toast: null,
   };
   player.banked = 0;
   SFX.waveClear();
 }
 
+function toast(s) { if (campfire) campfire.toast = { s, t: 1.6 }; }
+
 function pickCard(i) {
-  if (!campfire || i >= campfire.cards.length) return;
+  if (!campfire || campfire.picksLeft <= 0 || i >= campfire.cards.length) return;
   const c = campfire.cards[i];
   cardCounts[c.id] = (cardCounts[c.id] || 0) + 1;
   c.apply(player.stats);
   player.hp = Math.min(player.hp, player.stats.maxHp);
   SFX.card();
   campfire.picksLeft--;
-  if (campfire.picksLeft > 0) {
-    campfire.cards = drawThreeCards();
-  } else {
-    campfire = null;
-    startWave(G.wave + 1);
-    G.state = "play";
-  }
+  if (campfire.picksLeft > 0) campfire.cards = drawThreeCards();
+}
+
+function leaveCampfire() {
+  campfire = null;
+  startWave(G.wave + 1);
+  G.state = "play";
+}
+
+// campfire shop -------------------------------------------------------------
+const HEAL_COST = 5;
+function shopReroll() {
+  if (!campfire || campfire.picksLeft <= 0) return toast("no picks left to reroll");
+  if (G.coins < campfire.rerollCost) return toast("not enough gold");
+  G.coins -= campfire.rerollCost;
+  campfire.rerollCost += 2;
+  campfire.cards = drawThreeCards();
+  SFX.card();
+}
+function shopHeal() {
+  if (G.coins < HEAL_COST) return toast("not enough gold");
+  if (player.hp >= player.stats.maxHp - 0.5) return toast("already at full health");
+  G.coins -= HEAL_COST;
+  player.hp = Math.min(player.stats.maxHp, player.hp + player.stats.maxHp * 0.5);
+  toast("+" + Math.round(player.stats.maxHp * 0.5) + " HP");
+  SFX.gem();
+}
+function shopExtraPick() {
+  if (!campfire) return;
+  if (G.coins < campfire.pickCost) return toast("not enough gold");
+  G.coins -= campfire.pickCost;
+  campfire.pickCost += 5;
+  campfire.picksLeft++;
+  if (campfire.picksLeft === 1) campfire.cards = drawThreeCards();
+  SFX.level();
 }
 
 // ------------------------------------------------------------------ combat --
@@ -432,7 +464,8 @@ function killEnemy(e) {
   for (let i = 0; i < gemCount; i++) {
     gems.push({ x: e.x + rnd(-8, 8), y: e.y + rnd(-6, 6), v: e.xp / gemCount, t: rnd(0, 9), vx: rnd(-30, 30), vy: rnd(-60, -20) });
   }
-  if (Math.random() < 0.25) coins.push({ x: e.x, y: e.y, t: rnd(0, 9), vx: rnd(-25, 25), vy: rnd(-50, -20) });
+  const coinCount = e.big ? 3 : (Math.random() < 0.3 ? 1 : 0);
+  for (let i = 0; i < coinCount; i++) coins.push({ x: e.x + rnd(-6, 6), y: e.y + rnd(-4, 4), t: rnd(0, 9), vx: rnd(-25, 25), vy: rnd(-50, -20) });
   if (Math.random() < (e.big ? 0.8 : 0.04)) flasks.push({ x: e.x, y: e.y, t: 0 });
   if (e.boss) {
     G.shake = 12;
@@ -905,56 +938,111 @@ function renderHUD() {
 }
 
 // campfire scene -----------------------------------------------------------
-let cardRects = [];
+let cardRects = [], shopRects = [], nextRect = null;
 function renderCampfire(dt) {
   campfire.t += dt;
   ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
 
   // fire glow
-  const g = ctx.createRadialGradient(VW / 2, 96, 4, VW / 2, 96, 130);
+  const g = ctx.createRadialGradient(VW / 2, 84, 4, VW / 2, 84, 130);
   g.addColorStop(0, "rgba(252,150,50,0.28)");
   g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
 
-  drawSprite(animFrame(ANIM.campfire, campfire.t, 8), VW / 2, 104, false, 2);
-  drawSprite(animFrame(ANIM.hero_idle, campfire.t, 6), VW / 2 - 34, 102, false);
+  drawSprite(animFrame(ANIM.campfire, campfire.t, 8), VW / 2, 88, false, 2);
+  drawSprite(animFrame(ANIM.hero_idle, campfire.t, 6), VW / 2 - 34, 86, false);
   ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd166";
-  ctx.fillText(`WAVE ${G.wave} CLEARED`, VW / 2, 30);
+  ctx.fillText(`WAVE ${G.wave} CLEARED`, VW / 2, 26);
   ctx.font = "8px monospace"; ctx.fillStyle = "#cfc6de";
-  ctx.fillText(`you rest by the fire… pick a card (${campfire.picksLeft} left)`, VW / 2, 44);
+  ctx.fillText(campfire.picksLeft > 0 ? `pick a card (${campfire.picksLeft} left)` : "rested and ready", VW / 2, 40);
 
-  // cards
-  cardRects = [];
-  const n = campfire.cards.length;
-  const cw = 88, chh = 120, gap = 18;
-  const total = n * cw + (n - 1) * gap;
-  for (let i = 0; i < n; i++) {
-    const x = VW / 2 - total / 2 + i * (cw + gap), y = 128;
-    cardRects.push({ x, y, w: cw, h: chh, i });
-    const c = campfire.cards[i];
-    const hov = campfire.chosen === i;
-    ctx.save();
-    if (hov) { ctx.translate(0, -6); }
-    const cim = IMG.card;
-    ctx.drawImage(cim, x, y, cw, chh);
-    if (hov) { ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2; ctx.strokeRect(x - 1, y - 1, cw + 2, chh + 2); }
-    const icon = IMG[c.icon];
-    if (icon && icon.complete) {
-      const s = 3;
-      ctx.drawImage(icon, Math.round(x + cw / 2 - icon.width * s / 2), y + 14, icon.width * s, icon.height * s);
+  // gold purse
+  const cim0 = IMG.coin_f0;
+  if (cim0 && cim0.complete) ctx.drawImage(cim0, VW - 52, 14);
+  ctx.textAlign = "right"; ctx.font = "bold 10px monospace"; ctx.fillStyle = "#ffd166";
+  ctx.fillText(`${G.coins}`, VW - 14, 24);
+
+  // cards or the road onward
+  cardRects = []; nextRect = null;
+  if (campfire.picksLeft > 0) {
+    const n = campfire.cards.length;
+    const cw = 88, chh = 116, gap = 18;
+    const total = n * cw + (n - 1) * gap;
+    for (let i = 0; i < n; i++) {
+      const x = VW / 2 - total / 2 + i * (cw + gap), y = 104;
+      cardRects.push({ x, y, w: cw, h: chh, i });
+      const c = campfire.cards[i];
+      const hov = campfire.chosen === i;
+      ctx.save();
+      if (hov) ctx.translate(0, -5);
+      ctx.drawImage(IMG.card, x, y, cw, chh);
+      if (hov) { ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 2; ctx.strokeRect(x - 1, y - 1, cw + 2, chh + 2); }
+      const icon = IMG[c.icon];
+      if (icon && icon.complete) {
+        const s = Math.min(3, 44 / icon.height);
+        const ih = icon.height * s;
+        ctx.drawImage(icon, Math.round(x + cw / 2 - icon.width * s / 2), Math.round(y + 12 + (48 - ih) / 2), Math.round(icon.width * s), Math.round(ih));
+      }
+      ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#3a2c18";
+      ctx.fillText(c.name, x + cw / 2, y + 74);
+      ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
+      wrapText(c.desc, x + cw / 2, y + 87, cw - 14, 9);
+      const cnt = cardCounts[c.id] || 0;
+      if (cnt > 0) { ctx.fillStyle = "#8a6a30"; ctx.fillText(`owned ${cnt}/${c.max}`, x + cw / 2, y + 108); }
+      ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
+      ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 11);
+      ctx.restore();
     }
-    ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#3a2c18";
-    ctx.fillText(c.name, x + cw / 2, y + 78);
-    ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
-    wrapText(c.desc, x + cw / 2, y + 92, cw - 14, 9);
-    const cnt = cardCounts[c.id] || 0;
-    if (cnt > 0) { ctx.fillStyle = "#8a6a30"; ctx.fillText(`owned ${cnt}/${c.max}`, x + cw / 2, y + 112); }
-    ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
-    ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 12);
-    ctx.restore();
+  } else {
+    const bw = 150, bh = 30, bx = VW / 2 - bw / 2, by = 140;
+    nextRect = { x: bx, y: by, w: bw, h: bh };
+    ctx.fillStyle = "#241c2e"; ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+    ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
+    ctx.fillStyle = Math.floor(campfire.t * 2) % 2 ? "#fff" : "#ffd166";
+    ctx.fillText(`NEXT WAVE  [ENTER]`, VW / 2, by + 19);
   }
-  ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485"; ctx.textAlign = "center";
-  ctx.fillText("click a card or press 1·2·3", VW / 2, VH - 8);
+
+  // shop row
+  shopRects = [];
+  const items = [
+    { id: "reroll", label: "REROLL", key: "R", icon: "card", cost: campfire.rerollCost, on: campfire.picksLeft > 0 },
+    { id: "heal", label: "HEAL 50%", key: "H", icon: "flask_big_red", cost: HEAL_COST, on: player.hp < player.stats.maxHp - 0.5 },
+    { id: "pick", label: "+1 CARD", key: "B", icon: "xp_gem_f0", cost: campfire.pickCost, on: true },
+  ];
+  const bw = 128, bh = 24, gap2 = 14;
+  const total2 = items.length * bw + (items.length - 1) * gap2;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const x = VW / 2 - total2 / 2 + i * (bw + gap2), y = VH - 34;
+    shopRects.push({ x, y, w: bw, h: bh, id: it.id });
+    const afford = G.coins >= it.cost && it.on;
+    ctx.fillStyle = afford ? "#241c2e" : "#181322";
+    ctx.fillRect(x, y, bw, bh);
+    ctx.strokeStyle = afford ? "#8a6a30" : "#3a3346"; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, bw - 1, bh - 1);
+    const icon = IMG[it.icon];
+    if (icon && icon.complete) {
+      const s = it.icon === "card" ? 0.28 : 1.4;
+      ctx.drawImage(icon, x + 6, Math.round(y + bh / 2 - icon.height * s / 2), Math.round(icon.width * s), Math.round(icon.height * s));
+    }
+    ctx.font = "bold 8px monospace"; ctx.textAlign = "left";
+    ctx.fillStyle = afford ? "#e8dfc8" : "#57506b";
+    ctx.fillText(`${it.label} [${it.key}]`, x + 24, y + 15);
+    ctx.textAlign = "right";
+    ctx.fillStyle = afford ? "#ffd166" : "#57506b";
+    ctx.fillText(`${it.cost}g`, x + bw - 6, y + 15);
+  }
+
+  // toast
+  if (campfire.toast) {
+    campfire.toast.t -= dt;
+    if (campfire.toast.t <= 0) campfire.toast = null;
+    else {
+      ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd166";
+      ctx.fillText(campfire.toast.s, VW / 2, VH - 42);
+    }
+  }
 }
 
 function wrapText(text, x, y, maxW, lh) {
@@ -1125,6 +1213,10 @@ function handleKey(code) {
     if (code === "Digit1") pickCard(0);
     if (code === "Digit2") pickCard(1);
     if (code === "Digit3") pickCard(2);
+    if (code === "KeyR") shopReroll();
+    if (code === "KeyH") shopHeal();
+    if (code === "KeyB") shopExtraPick();
+    if (code === "Enter" && campfire && campfire.picksLeft <= 0) leaveCampfire();
   } else if (G.state === "gameover" && code === "Enter") { cardCounts = {}; G.state = "select"; }
   else if (G.state === "victory") {
     if (code === "KeyE") { G.endless = true; G.state = "play"; enterCampfire(); }
@@ -1144,6 +1236,17 @@ function handleClick(x, y) {
   if (G.state === "gameover") { cardCounts = {}; G.state = "select"; return true; }
   if (G.state === "victory") { G.endless = true; G.state = "play"; enterCampfire(); return true; }
   if (G.state === "campfire") {
+    for (const r of shopRects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+        if (r.id === "reroll") shopReroll();
+        else if (r.id === "heal") shopHeal();
+        else if (r.id === "pick") shopExtraPick();
+        return true;
+      }
+    }
+    if (nextRect && x >= nextRect.x && x <= nextRect.x + nextRect.w && y >= nextRect.y && y <= nextRect.y + nextRect.h) {
+      leaveCampfire(); return true;
+    }
     for (const r of cardRects) {
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) { pickCard(r.i); return true; }
     }
