@@ -40,6 +40,8 @@ const ANIM = {
   assassin_run: ["assassin_run_f0", "assassin_run_f1", "assassin_run_f2", "assassin_run_f3"],
   monk_idle: ["monk_idle_f0", "monk_idle_f1", "monk_idle_f2", "monk_idle_f3"],
   monk_run: ["monk_run_f0", "monk_run_f1", "monk_run_f2", "monk_run_f3"],
+  mage_idle: ["wizzard_m_idle_f0", "wizzard_m_idle_f1", "wizzard_m_idle_f2", "wizzard_m_idle_f3"],
+  mage_run: ["wizzard_m_run_f0", "wizzard_m_run_f1", "wizzard_m_run_f2", "wizzard_m_run_f3"],
   orc_grunt_idle: ["orc_grunt_idle_f0", "orc_grunt_idle_f1", "orc_grunt_idle_f2", "orc_grunt_idle_f3"],
   orc_grunt_run: ["orc_grunt_run_f0", "orc_grunt_run_f1", "orc_grunt_run_f2", "orc_grunt_run_f3"],
   goblin_idle: ["goblin_idle_f0", "goblin_idle_f1", "goblin_idle_f2", "goblin_idle_f3"],
@@ -165,8 +167,8 @@ window.addEventListener("keydown", e => {
 window.addEventListener("keyup", e => { keys[e.code] = false; });
 
 // virtual joystick + dash button for touch
-const touchState = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
-let usingTouch = false;
+const touchState = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0, maxD: 0, t0: 0 };
+let usingTouch = false, lastPointerTouch = false;
 const DASH_BTN = { x: VW - 30, y: VH - 30, r: 18 };
 function canvasPos(t) {
   const r = canvas.getBoundingClientRect();
@@ -177,6 +179,7 @@ function canvasPos(t) {
 }
 canvas.addEventListener("pointerdown", e => {
   if (e.pointerType === "touch") usingTouch = true;
+  lastPointerTouch = e.pointerType === "touch";
   const p = canvasPos(e);
   if (passModal.open || (["title", "cls", "select"].includes(G.state) && keyBtnRect &&
       p.x >= keyBtnRect.x - 3 && p.x <= keyBtnRect.x + keyBtnRect.w + 3 &&
@@ -199,14 +202,23 @@ canvas.addEventListener("pointerdown", e => {
   if (handleClick(p.x, p.y)) return;
   touchState.active = true; touchState.id = e.pointerId;
   touchState.ox = p.x; touchState.oy = p.y; touchState.dx = 0; touchState.dy = 0;
+  touchState.maxD = 0; touchState.t0 = performance.now();
 });
 canvas.addEventListener("pointermove", e => {
   if (!touchState.active || e.pointerId !== touchState.id) return;
   const p = canvasPos(e);
   touchState.dx = p.x - touchState.ox; touchState.dy = p.y - touchState.oy;
+  touchState.maxD = Math.max(touchState.maxD, Math.hypot(touchState.dx, touchState.dy));
 });
 window.addEventListener("pointerup", e => {
-  if (e.pointerId === touchState.id) touchState.active = false;
+  if (e.pointerId !== touchState.id) return;
+  touchState.active = false;
+  // a quick tap (no drag) casts the mage's next ready spell on touch
+  if (usingTouch && G.state === "play" && !G.paused && player &&
+      WEAPONS[G.weapon].spells && touchState.maxD < 12 &&
+      performance.now() - touchState.t0 < 300) {
+    castNextReady();
+  }
 });
 
 // ------------------------------------------------------------------- util --
@@ -297,7 +309,7 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
@@ -312,6 +324,13 @@ const WEAPONS = {
   shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 5, atkSpd: 2.6, range: 25, arc: 1.2 },
   katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
   shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 5, atkSpd: 2.8, range: 125, arc: 0, star: true },
+  spells: { name: "Arcane Arts", desc: "fireball · shockwave · firebeam", sprite: "weapon_red_magic_staff", dmg: 10, atkSpd: 1, range: 165, arc: 0, spells: true },
+};
+
+const SPELLS = {
+  fire: { name: "Fireball", cd: 6 },
+  shock: { name: "Shockwave", cd: 8 },
+  beam: { name: "Firebeam", cd: 12 },
 };
 
 // classes -------------------------------------------------------------------
@@ -331,6 +350,9 @@ const CLASSES = {
   reaper: { name: "Reaper", anim: "reaper", desc: "+10% dmg, 2% lifesteal, frail", unlock: "reaper", price: 600,
     weapons: ["scythe", "knives"],
     mods: s => { s.dmg *= 1.10; s.lifesteal += 0.02; s.maxHp = 45; s.moveSpd *= 1.05; } },
+  mage: { name: "Mage", anim: "mage", desc: "3 spells: click casts, auto-aim", unlock: "mage", price: 1000,
+    weapons: ["spells"],
+    mods: s => { s.maxHp = 50; } },
   monk: { name: "Monk", anim: "monk", desc: "dev tester — masters every weapon", devOnly: true,
     weapons: Object.keys(WEAPONS),
     mods: s => { s.maxHp = 65; } },
@@ -351,7 +373,7 @@ function bankCoins() {
 }
 
 // unlocks persist across runs (best-effort; storage may be unavailable)
-const UN = { barbar: false, nun: false, reaper: false, scythe: false, assassin: false };
+const UN = { barbar: false, nun: false, reaper: false, scythe: false, assassin: false, mage: false };
 try { Object.assign(UN, JSON.parse(localStorage.getItem("orcslasher_unlocks") || "{}")); } catch (e) { /* no storage */ }
 function saveUnlocks() { try { localStorage.setItem("orcslasher_unlocks", JSON.stringify(UN)); } catch (e) { /* no storage */ } }
 function isUnlocked(key) { return DEV.on || !key || UN[key]; }
@@ -439,7 +461,8 @@ function newRun(weaponId) {
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; fx = []; texts = [];
+  player.spellCd = { fire: 0, shock: 0, beam: 0 };
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
   startWave(1);
@@ -757,6 +780,68 @@ function playerStarAttack() {
   SFX.slash();
 }
 
+// mage spells — manual cast (click/tap or 1/2/3), auto-aimed, long cooldowns
+function castSpell(id) {
+  if (!player || player.spellCd[id] > 0) return false;
+  const st = player.stats;
+  if (id === "fire") {
+    const target = nearestEnemy(player, st.range);
+    if (!target) return false;
+    const ang = Math.atan2(target.y - player.y, target.x - player.x);
+    player.facing = Math.cos(ang) >= 0 ? 1 : -1;
+    player.atkAng = ang;
+    fireballs.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 180, vy: Math.sin(ang) * 180, t: 0, life: 1.1 });
+    SFX.slash();
+  } else if (id === "shock") {
+    if (!enemies.some(e => e.warmup <= 0 && dist(e, player) < 70)) return false;
+    fx.push({ kind: "ring", x: player.x, y: player.y, life: 0.4, max: 0.4, r: 62 });
+    G.shake = Math.max(G.shake, 5);
+    SFX.boom();
+    for (const e of [...enemies]) {
+      if (e.warmup > 0) continue;
+      const d = dist(e, player);
+      if (d < 62 + e.r) {
+        const a = Math.atan2(e.y - player.y, e.x - player.x);
+        e.x += Math.cos(a) * 34; e.y += Math.sin(a) * 34;
+        damageEnemy(e, st.dmg * 0.8 * rnd(0.9, 1.1), false);
+      }
+    }
+  } else if (id === "beam") {
+    const target = nearestEnemy(player, st.range + 30);
+    if (!target) return false;
+    const ang = Math.atan2(target.y - player.y, target.x - player.x);
+    player.facing = Math.cos(ang) >= 0 ? 1 : -1;
+    player.atkAng = ang;
+    beams.push({ ang, t: 1.3, tick: 0, len: 150 });
+    SFX.bossRoar();
+  }
+  player.spellCd[id] = SPELLS[id].cd;
+  return true;
+}
+
+function castNextReady() {
+  for (const id of ["fire", "shock", "beam"]) {
+    if (player.spellCd[id] <= 0 && castSpell(id)) return true;
+  }
+  return false;
+}
+
+function explodeFireball(f) {
+  const st = player.stats;
+  SFX.boom();
+  G.shake = Math.max(G.shake, 3);
+  for (const e of [...enemies]) {
+    if (e.warmup > 0) continue;
+    if (Math.hypot(e.x - f.x, e.y - f.y) < 28 + e.r) {
+      const crit = Math.random() < st.crit;
+      damageEnemy(e, st.dmg * 1.1 * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+    }
+  }
+  for (let i = 0; i < 10; i++) {
+    fx.push({ kind: "spark", x: f.x, y: f.y - 2, vx: rnd(-60, 60), vy: rnd(-80, -10), life: rnd(0.2, 0.5), max: 0.5 });
+  }
+}
+
 function playerBowAttack() {
   const st = player.stats;
   const target = nearestEnemy(player, st.range);
@@ -814,7 +899,37 @@ function updatePlay(dt) {
     if (player.atkCd <= 0) playerMolotovAttack();
   } else if (WEAPONS[G.weapon].star) {
     if (player.atkCd <= 0) playerStarAttack();
+  } else if (WEAPONS[G.weapon].spells) {
+    for (const id of Object.keys(player.spellCd)) player.spellCd[id] = Math.max(0, player.spellCd[id] - dt);
   } else if (player.atkCd <= 0) playerMeleeAttack();
+
+  // -- mage projectiles & beams
+  for (const f of [...fireballs]) {
+    f.x += f.vx * dt; f.y += f.vy * dt; f.t += dt; f.life -= dt;
+    let hit = f.life <= 0;
+    for (const e of enemies) {
+      if (e.warmup > 0) continue;
+      if (dist(f, { x: e.x, y: e.y - 4 }) < e.r + 6) { hit = true; break; }
+    }
+    if (hit) { fireballs.splice(fireballs.indexOf(f), 1); explodeFireball(f); }
+  }
+  for (const b of [...beams]) {
+    b.t -= dt; b.tick -= dt;
+    if (b.t <= 0) { beams.splice(beams.indexOf(b), 1); continue; }
+    if (b.tick <= 0) {
+      b.tick = 0.3;
+      const ox = player.x, oy = player.y - 6;
+      for (const e of [...enemies]) {
+        if (e.warmup > 0) continue;
+        const dx = e.x - ox, dy = (e.y - 6) - oy;
+        const proj = dx * Math.cos(b.ang) + dy * Math.sin(b.ang);
+        const perp = Math.abs(-dx * Math.sin(b.ang) + dy * Math.cos(b.ang));
+        if (proj > 4 && proj < b.len && perp < 10 + e.r) {
+          damageEnemy(e, player.stats.dmg * 0.45 * rnd(0.9, 1.1), false);
+        }
+      }
+    }
+  }
 
   // -- molotovs & burning ground
   for (const m of [...molotovs]) {
@@ -1108,11 +1223,40 @@ function renderWorld() {
     ctx.drawImage(im, -im.width / 2, -im.height / 2);
     ctx.restore();
   }
+  for (const f of fireballs) {
+    const g3 = ctx.createRadialGradient(f.x, f.y, 1, f.x, f.y, 10);
+    g3.addColorStop(0, "rgba(255,240,180,0.95)");
+    g3.addColorStop(0.5, "rgba(240,130,40,0.7)");
+    g3.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g3;
+    ctx.fillRect(f.x - 10, f.y - 10, 20, 20);
+    ctx.fillStyle = "#fff3c4";
+    ctx.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
+  }
+  for (const b of beams) {
+    const ox = player.x, oy = player.y - 6;
+    const flick = 0.7 + Math.sin(G.t * 40) * 0.3;
+    const fade = clamp(b.t / 0.3, 0, 1); // fades out at the end
+    ctx.save();
+    ctx.translate(ox, oy); ctx.rotate(b.ang);
+    ctx.lineCap = "round";
+    for (const [w2, col] of [[9, `rgba(200,50,20,${0.25 * fade})`], [5, `rgba(240,130,40,${0.55 * fade * flick})`], [2, `rgba(255,240,190,${0.9 * fade})`]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = w2;
+      ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(b.len, 0); ctx.stroke();
+    }
+    ctx.restore();
+  }
   for (const b of bolts) drawSprite(animFrame(ANIM.bolt, b.t, 8), b.x, b.y + 3);
   for (const p of fx) {
     if (p.kind === "blood") {
       ctx.fillStyle = `rgba(110,180,60,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+    } else if (p.kind === "ring") {
+      const pr = (1 - p.life / p.max) * p.r;
+      ctx.strokeStyle = `rgba(255,209,102,${p.life / p.max})`; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = `rgba(255,255,255,${0.5 * p.life / p.max})`; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0, pr - 5), 0, Math.PI * 2); ctx.stroke();
     } else if (p.kind === "spark") {
       ctx.fillStyle = `rgba(252,${140 + Math.round(90 * p.life / p.max)},50,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
@@ -1196,10 +1340,10 @@ function drawPlayer() {
     ctx.drawImage(im, -im.width / 2, -im.height + 3);
     ctx.restore();
   } else {
-    const swing = (wdef.ranged || wdef.thrown || wdef.star || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
+    const swing = (wdef.ranged || wdef.thrown || wdef.star || wdef.spells || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
     ctx.save();
     ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
-    ctx.rotate(player.facing * ((wdef.ranged || wdef.thrown || wdef.star) ? 0.15 : 0.5 + swing));
+    ctx.rotate(player.facing * ((wdef.ranged || wdef.thrown || wdef.star || wdef.spells) ? 0.15 : 0.5 + swing));
     ctx.scale(player.facing, 1);
     ctx.drawImage(im, -2, -im.height + 4);
     ctx.restore();
@@ -1260,6 +1404,12 @@ function renderDarkness(cx, cy) {
   for (const b of bolts) punch(b.x, b.y, 22, 0.8);
   for (const f of firePatches) punch(f.x, f.y, 55, 0.85 * clamp(f.life / f.max + 0.3, 0, 1));
   for (const m of molotovs) punch(m.x, m.y, 18, 0.7);
+  for (const f of fireballs) punch(f.x, f.y, 30, 0.8);
+  for (const b of beams) {
+    for (let i = 0; i < 4; i++) {
+      punch(player.x + Math.cos(b.ang) * (20 + i * 38), player.y - 6 + Math.sin(b.ang) * (20 + i * 38), 26, 0.6);
+    }
+  }
   let n = 0;
   for (const e of enemies) { if (n++ > 50) break; punch(e.x, e.y, e.big ? 40 : 24, 0.45); }
   for (const g2 of gems) punch(g2.x, g2.y, 10, 0.5);
@@ -1318,6 +1468,10 @@ function renderHUD() {
   if (DEV.on && G.cls === "monk") renderInventoryBar();
   else invRects = [];
 
+  // mage spell bar
+  if (WEAPONS[G.weapon].spells) renderSpellBar();
+  else spellRects = [];
+
   // touch dash button
   if (usingTouch) {
     const ready = player.dashCd <= 0;
@@ -1356,6 +1510,57 @@ function monkSwitchWeapon(id) {
   player.hp = clamp(hpFrac * stats.maxHp, 1, stats.maxHp);
   player.atkCd = 0; player.reloadT = 0; player.ammo = WEAPONS[id].clip || 0;
   SFX.card();
+}
+
+let spellRects = [];
+function renderSpellBar() {
+  spellRects = [];
+  const ids = Object.keys(SPELLS);
+  const slot = 26, gap = 6;
+  const total = ids.length * slot + (ids.length - 1) * gap;
+  // sits above the monk's arsenal bar when he's testing the spells
+  const x0 = VW / 2 - total / 2, y = (DEV.on && G.cls === "monk") ? VH - 62 : VH - 32;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i], x = x0 + i * (slot + gap);
+    spellRects.push({ x, y, w: slot, h: slot, id });
+    const cd = player.spellCd[id], ready = cd <= 0;
+    ctx.fillStyle = ready ? "rgba(255,209,102,0.16)" : "rgba(24,19,34,0.85)";
+    ctx.fillRect(x, y, slot, slot);
+    ctx.strokeStyle = ready ? "#ffd166" : "#3a3346"; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, slot - 1, slot - 1);
+    // icon
+    const cx2 = x + slot / 2, cy2 = y + slot / 2;
+    const col = ready ? "#ffb347" : "#57506b";
+    if (id === "fire") {
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(cx2, cy2 + 1, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = ready ? "#fff3c4" : "#6f6485";
+      ctx.beginPath(); ctx.arc(cx2 - 1, cy2, 2.5, 0, Math.PI * 2); ctx.fill();
+    } else if (id === "shock") {
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx2, cy2, 7, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx2, cy2, 3.5, 0, Math.PI * 2); ctx.stroke();
+    } else {
+      ctx.strokeStyle = col; ctx.lineCap = "round";
+      for (const [w2, len] of [[3, 8], [1.5, 10]]) {
+        ctx.lineWidth = w2;
+        ctx.beginPath(); ctx.moveTo(cx2 - len, cy2 + (w2 === 3 ? 0 : -4)); ctx.lineTo(cx2 + len, cy2 + (w2 === 3 ? 0 : -4)); ctx.stroke();
+      }
+    }
+    // cooldown veil
+    if (!ready) {
+      const frac = cd / SPELLS[id].cd;
+      ctx.fillStyle = "rgba(7,5,16,0.72)";
+      ctx.fillRect(x + 1, y + 1, slot - 2, Math.round((slot - 2) * frac));
+      ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#cfc6de";
+      ctx.fillText(Math.ceil(cd), cx2, cy2 + 3);
+    }
+    ctx.font = "6px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#6f6485";
+    ctx.fillText(`[${i + 1}]`, cx2, y + slot + 7);
+  }
+  ctx.font = "6px monospace"; ctx.fillStyle = "#8f84a8";
+  ctx.fillText("click / tap to cast — aim is automatic", VW / 2, y - 4);
 }
 
 function renderInventoryBar() {
@@ -1711,8 +1916,9 @@ let clsRects = [], clsToast = null;
 
 function selectClass(id) {
   G.cls = id;
-  // the monk swaps weapons in-game via his inventory bar — no select screen
+  // monk swaps in-game, mage has only his spells — both skip weapon select
   if (id === "monk") newRun("sword");
+  else if (id === "mage") newRun("spells");
   else G.state = "select";
 }
 
@@ -1735,6 +1941,7 @@ function unlockHint(id, c) {
   const buy = `buy ${c.price}g`;
   if (id === "reaper") return buy + " · or reach wave 10";
   if (id === "barbar" || id === "nun") return buy + " · or 0.1% boss relic";
+  if (id === "mage") return buy + " — the arcane is costly";
   return buy;
 }
 
@@ -2011,6 +2218,10 @@ function handleKey(code) {
       const i = ids.indexOf(G.weapon);
       monkSwitchWeapon(ids[(i + (code === "KeyE" ? 1 : ids.length - 1)) % ids.length]);
     }
+    if (WEAPONS[G.weapon].spells && !G.paused) {
+      const m = /^Digit([1-3])$/.exec(code);
+      if (m) castSpell(Object.keys(SPELLS)[+m[1] - 1]);
+    }
   }
 }
 
@@ -2089,6 +2300,15 @@ function handleClick(x, y) {
         monkSwitchWeapon(r.id);
         return true;
       }
+    }
+    if (WEAPONS[G.weapon].spells && !G.paused) {
+      for (const r of spellRects) {
+        if (x >= r.x - 3 && x <= r.x + r.w + 3 && y >= r.y - 3 && y <= r.y + r.h + 3) {
+          castSpell(r.id);
+          return true;
+        }
+      }
+      if (!lastPointerTouch) { castNextReady(); return true; } // mouse: click anywhere casts
     }
     if (G.paused) {
       if (fsPauseRect && x >= fsPauseRect.x && x <= fsPauseRect.x + fsPauseRect.w &&
