@@ -763,8 +763,10 @@ window.addEventListener("keydown", e => {
 });
 window.addEventListener("keyup", e => { keys[e.code] = false; });
 
-// virtual joystick for touch
+// virtual joystick + dash button for touch
 const touchState = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
+let usingTouch = false;
+const DASH_BTN = { x: VW - 30, y: VH - 30, r: 18 };
 function canvasPos(t) {
   const r = canvas.getBoundingClientRect();
   // object-fit: contain math
@@ -773,7 +775,19 @@ function canvasPos(t) {
   return { x: (t.clientX - r.left - offX) / scale, y: (t.clientY - r.top - offY) / scale };
 }
 canvas.addEventListener("pointerdown", e => {
+  if (e.pointerType === "touch") usingTouch = true;
   const p = canvasPos(e);
+  if (G.state === "play" && usingTouch &&
+      Math.hypot(p.x - DASH_BTN.x, p.y - DASH_BTN.y) < DASH_BTN.r + 6) {
+    // dash toward joystick direction, or facing if standing still
+    let dx = player.facing, dy = 0;
+    if (touchState.active) {
+      const d = Math.hypot(touchState.dx, touchState.dy);
+      if (d > 8) { dx = touchState.dx / d; dy = touchState.dy / d; }
+    }
+    tryDash(dx, dy);
+    return;
+  }
   if (handleClick(p.x, p.y)) return;
   touchState.active = true; touchState.id = e.pointerId;
   touchState.ox = p.x; touchState.oy = p.y; touchState.dx = 0; touchState.dy = 0;
@@ -1148,10 +1162,7 @@ function updatePlay(dt) {
   if (ml > 0) { mx /= ml; my /= ml; player.facing = mx !== 0 ? Math.sign(mx) : player.facing; }
 
   player.dashCd = Math.max(0, player.dashCd - dt);
-  if ((keys.Space || keys.ShiftLeft) && player.dashCd === 0 && ml > 0) {
-    player.dashCd = 2; player.dashT = 0.16; player.dashX = mx; player.dashY = my;
-    SFX.dash();
-  }
+  if ((keys.Space || keys.ShiftLeft) && ml > 0) tryDash(mx, my);
   let speed = st.moveSpd;
   if (player.dashT > 0) { player.dashT -= dt; speed = st.moveSpd * 3.2; mx = player.dashX; my = player.dashY; }
 
@@ -1319,6 +1330,12 @@ function updatePlay(dt) {
       enterCampfire();
     }
   }
+}
+
+function tryDash(dx, dy) {
+  if (player.dashCd > 0) return;
+  player.dashCd = 2; player.dashT = 0.16; player.dashX = dx; player.dashY = dy;
+  SFX.dash();
 }
 
 function hurtPlayer(dmg) {
@@ -1514,26 +1531,40 @@ function renderHUD() {
   ctx.fillText(`WAVE ${G.wave}`, VW / 2, 14);
   ctx.font = "7px monospace"; ctx.fillStyle = "#cfc6de";
   ctx.fillText(`${enemies.length + spawnQueue.length} orcs left`, VW / 2, 23);
-  // kills & coins
+  // kills
+  const sk = IMG.skull;
+  if (sk && sk.complete) ctx.drawImage(sk, VW - 26 - String(G.kills).length * 5, 5);
   ctx.textAlign = "right";
-  ctx.fillStyle = "#ffd166"; ctx.fillText(`⚔ ${G.kills}`, VW - 10, 14);
-  const cim = IMG.coin_f0;
-  if (cim && cim.complete) ctx.drawImage(cim, VW - 34, 17);
-  ctx.fillText(`${G.coins}`, VW - 10, 23);
-  // dash cd
-  if (player.dashCd > 0) { ctx.textAlign = "left"; ctx.fillStyle = "#6f6485"; ctx.fillText("dash…", 8, 33); }
-  else { ctx.textAlign = "left"; ctx.fillStyle = "#9ae1ff"; ctx.fillText("DASH ⯈ space", 8, 33); }
+  ctx.fillStyle = "#ffd166"; ctx.fillText(`${G.kills}`, VW - 10, 14);
   // bow ammo
   if (WEAPONS[G.weapon].ranged) {
     if (player.reloadT > 0) {
-      bar(8, 38, 60, 4, 1 - player.reloadT / WEAPONS[G.weapon].reload, "#ffd166");
-      ctx.fillStyle = "#ffd166"; ctx.fillText("reloading", 72, 43);
+      bar(8, 30, 60, 4, 1 - player.reloadT / WEAPONS[G.weapon].reload, "#ffd166");
     } else {
       for (let i = 0; i < WEAPONS[G.weapon].clip; i++) {
         ctx.fillStyle = i < player.ammo ? "#ffd166" : "#3a3346";
-        ctx.fillRect(8 + i * 6, 38, 4, 4);
+        ctx.fillRect(8 + i * 6, 30, 4, 4);
       }
     }
+  }
+  // touch dash button
+  if (usingTouch) {
+    const ready = player.dashCd <= 0;
+    ctx.beginPath(); ctx.arc(DASH_BTN.x, DASH_BTN.y, DASH_BTN.r, 0, Math.PI * 2);
+    ctx.fillStyle = ready ? "rgba(255,209,102,0.30)" : "rgba(120,110,140,0.18)";
+    ctx.fill();
+    if (!ready) { // cooldown wedge
+      ctx.beginPath();
+      ctx.moveTo(DASH_BTN.x, DASH_BTN.y);
+      ctx.arc(DASH_BTN.x, DASH_BTN.y, DASH_BTN.r, -Math.PI / 2, -Math.PI / 2 + (1 - player.dashCd / 2) * Math.PI * 2);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(255,209,102,0.25)"; ctx.fill();
+    }
+    ctx.strokeStyle = ready ? "#ffd166" : "#6f6485"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(DASH_BTN.x, DASH_BTN.y, DASH_BTN.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = "bold 9px monospace"; ctx.textAlign = "center";
+    ctx.fillStyle = ready ? "#fff" : "#8f84a8";
+    ctx.fillText("»", DASH_BTN.x, DASH_BTN.y + 3);
   }
 }
 
@@ -1647,21 +1678,10 @@ function renderTitle(t) {
   const sky = ctx.createLinearGradient(0, 0, 0, VH);
   sky.addColorStop(0, "#070510"); sky.addColorStop(0.6, "#120c1c"); sky.addColorStop(1, "#1c1224");
   ctx.fillStyle = sky; ctx.fillRect(0, 0, VW, VH);
-  ctx.fillStyle = "#0a0712";
-  for (let i = 0; i < 16; i++) {
-    const x = i * 32 + ((i * 53) % 17);
-    const h = 14 + ((i * 37) % 22);
-    ctx.beginPath();
-    ctx.moveTo(x - 10, 0); ctx.lineTo(x + 10, 0); ctx.lineTo(x, h);
-    ctx.closePath(); ctx.fill();
-  }
 
-  // warm glow from the campfire corner + cool moonish glow right
-  let g = ctx.createRadialGradient(64, 216, 6, 64, 216, 190);
+  // warm glow from the campfire corner
+  const g = ctx.createRadialGradient(64, 216, 6, 64, 216, 190);
   g.addColorStop(0, "rgba(252,150,50,0.30)"); g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
-  g = ctx.createRadialGradient(VW - 60, 90, 10, VW - 60, 90, 170);
-  g.addColorStop(0, "rgba(90,110,220,0.10)"); g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
 
   // drifting embers (deterministic per index — no flicker)
@@ -1677,7 +1697,7 @@ function renderTitle(t) {
 
   // title: layered gold-gradient wordmark with pulse
   ctx.save();
-  ctx.translate(VW / 2, 74);
+  ctx.translate(VW / 2, 92);
   const pulse = 1 + Math.sin(t * 2) * 0.012;
   ctx.scale(pulse, pulse);
   ctx.textAlign = "center";
@@ -1690,8 +1710,6 @@ function renderTitle(t) {
   ctx.strokeText("ORC SLASHER", 0, 0);
   ctx.restore();
   ctx.textAlign = "center";
-  ctx.font = "8px monospace"; ctx.fillStyle = "#b9aed0";
-  ctx.fillText("— a cave full of orcs · one knight · endless waves —", VW / 2, 94);
 
   // ground strip
   if (!titleFloor) {
@@ -1731,15 +1749,11 @@ function renderTitle(t) {
   fade.addColorStop(0, "rgba(7,5,16,0)"); fade.addColorStop(1, "rgba(7,5,16,0.85)");
   ctx.fillStyle = fade; ctx.fillRect(VW - 90, VH - 90, 90, 90);
 
-  // prompt + footer
+  // prompt
   ctx.font = "bold 11px monospace";
   const blink = (Math.sin(t * 4) + 1) / 2;
   ctx.fillStyle = `rgba(255,${209 + blink * 40},${102 + blink * 140},${0.6 + blink * 0.4})`;
-  ctx.fillText("PRESS ENTER / TAP TO SLAY", VW / 2, 130);
-  ctx.font = "7px monospace"; ctx.fillStyle = "#8f84a8";
-  ctx.fillText("WASD move · auto-attack · SPACE dash · rest at the campfire, pick your cards", VW / 2, 148);
-  ctx.fillStyle = "#57506b";
-  ctx.fillText("sprites: 0x72 DungeonTilesetII (CC0) · CraftPix top-down orcs · original warchief & campfire art", VW / 2, 162);
+  ctx.fillText("PRESS ENTER / TAP TO SLAY", VW / 2, 138);
 }
 
 function renderEnd(victory, t) {
