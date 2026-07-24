@@ -8,8 +8,10 @@ the campfire between waves. Survive to wave 10 and face the **Orc Warchief**.
 
 ## ▶ Play
 
-Open **`dist/orc-slasher.html`** in any browser. That's it — one file,
-works offline, on desktop and phone.
+**Play it now: https://bugabinga.github.io/orc-slasher/**
+
+Or open **`dist/orc-slasher.html`** in any browser — one file, works
+offline, on desktop and phone.
 
 ## How to play
 
