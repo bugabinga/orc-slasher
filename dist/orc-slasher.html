@@ -932,12 +932,15 @@ const WEAPONS = {
 
 // classes -------------------------------------------------------------------
 const CLASSES = {
-  knight: { name: "Knight", anim: "hero", desc: "balanced, dependable", mods: s => s },
+  knight: { name: "Knight", anim: "hero", desc: "balanced, dependable", weapons: ["sword", "spear", "bow"], mods: s => s },
   barbar: { name: "Barbarian", anim: "barbar", desc: "+25% dmg, +10% speed, takes +15% dmg", unlock: "barbar",
+    weapons: ["knives", "spear", "whip"],
     mods: s => { s.dmg *= 1.25; s.moveSpd *= 1.10; s.armor = 1 - (1 - s.armor) * 1.15; s.maxHp = 70; } },
   nun: { name: "Nun", anim: "nun", desc: "+1.2 HP/s, +20% XP, -15% dmg", unlock: "nun",
+    weapons: ["whip", "bow"],
     mods: s => { s.regen += 1.2; s.xpGain *= 1.20; s.dmg *= 0.85; s.maxHp = 55; } },
   reaper: { name: "Reaper", anim: "reaper", desc: "+20% dmg, 3% lifesteal, frail", unlock: "reaper",
+    weapons: ["scythe", "knives"],
     mods: s => { s.dmg *= 1.20; s.lifesteal += 0.03; s.maxHp = 45; s.moveSpd *= 1.05; } },
 };
 
@@ -966,7 +969,7 @@ function newRun(weaponId) {
     x: WORLD_W / 2, y: WORLD_H / 2, r: 6, hp: stats.maxHp, level: 1, xp: 0,
     stats, banked: 0,
     facing: 1, moving: false, animT: 0,
-    atkCd: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
+    atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
   enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; fx = []; texts = [];
@@ -1210,7 +1213,12 @@ function playerMeleeAttack() {
   player.atkCd = 1 / st.atkSpd;
   const ang = Math.atan2(target.y - player.y, target.x - player.x);
   player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-  fx.push({ kind: "slash", x: player.x + Math.cos(ang) * 14, y: player.y + Math.sin(ang) * 14 - 6, ang, life: 0.18, max: 0.18 });
+  player.atkAng = ang;
+  if (G.weapon === "whip") {
+    fx.push({ kind: "whip", ang, life: 0.18, max: 0.18 });
+  } else if (G.weapon !== "spear") { // spear's thrust is the held weapon itself
+    fx.push({ kind: "slash", x: player.x + Math.cos(ang) * 14, y: player.y + Math.sin(ang) * 14 - 6, ang, life: 0.18, max: 0.18, scale: G.weapon === "scythe" ? 1.7 : 1 });
+  }
   SFX.slash();
   for (const e of [...enemies]) {
     if (e.warmup > 0) continue;
@@ -1509,9 +1517,33 @@ function renderWorld() {
       ctx.save();
       ctx.translate(p.x, p.y + 6);
       ctx.rotate(p.ang + Math.PI * 0.75);
+      if (p.scale && p.scale !== 1) ctx.scale(p.scale, p.scale);
       ctx.globalAlpha = 0.9;
       const im = IMG[f];
       ctx.drawImage(im, -im.width / 2, -im.height / 2);
+      ctx.restore();
+    } else if (p.kind === "whip") {
+      // cracking lash: quadratic curve from hand to tip, extends then snaps back
+      const prog = 1 - p.life / p.max;
+      const st2 = player.stats;
+      const len = st2.range * 1.05 * Math.sin(Math.PI * Math.min(1, prog * 1.15));
+      const hx = player.x + Math.cos(p.ang) * 6, hy = player.y - 8 + Math.sin(p.ang) * 6;
+      const tx2 = hx + Math.cos(p.ang) * len, ty2 = hy + Math.sin(p.ang) * len;
+      const px2 = -Math.sin(p.ang), py2 = Math.cos(p.ang);
+      const wob = Math.sin(prog * Math.PI * 3) * 9 * (1 - prog);
+      ctx.save();
+      ctx.lineCap = "round";
+      for (const [w2, col] of [[2.5, `rgba(94,62,40,${0.8 * p.life / p.max + 0.2})`], [1, `rgba(224,190,140,${0.9})`]]) {
+        ctx.strokeStyle = col; ctx.lineWidth = w2;
+        ctx.beginPath();
+        ctx.moveTo(hx, hy);
+        ctx.quadraticCurveTo(hx + Math.cos(p.ang) * len * 0.5 + px2 * wob, hy + Math.sin(p.ang) * len * 0.5 + py2 * wob, tx2, ty2);
+        ctx.stroke();
+      }
+      if (prog > 0.35 && prog < 0.75) { // crack flash at the tip
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fillRect(Math.round(tx2) - 1, Math.round(ty2) - 1, 3, 3);
+      }
       ctx.restore();
     }
   }
@@ -1539,21 +1571,42 @@ function drawPlayer() {
   drawSprite(animFrame(list, player.animT), player.x, player.y + 5, player.facing < 0, PLAYER_SCALE);
   ctx.filter = "none"; ctx.globalAlpha = 1;
   // held weapon(s)
-  const im = IMG[WEAPONS[G.weapon].sprite];
-  const swing = WEAPONS[G.weapon].ranged ? 0 : (player.atkCd > 1 / st.atkSpd - 0.15 ? -1.2 : 0);
-  ctx.save();
-  ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
-  ctx.rotate(player.facing * (WEAPONS[G.weapon].ranged ? 0.15 : 0.5 + swing));
-  ctx.scale(player.facing, 1);
-  ctx.drawImage(im, -2, -im.height + 4);
-  ctx.restore();
-  if (G.weapon === "knives") { // off-hand knife
+  const wdef = WEAPONS[G.weapon];
+  const im = IMG[wdef.sprite];
+  const tSince = 1 / st.atkSpd - player.atkCd;
+  const attacking = player.atkCd > 0 && tSince >= 0 && tSince < 0.22;
+  if (G.weapon === "spear" && attacking) {
+    // thrust: the spear itself shoots out along the attack angle and returns
+    const prog = Math.sin(Math.PI * tSince / 0.22);
+    const d = 4 + prog * st.range * 0.6;
     ctx.save();
-    ctx.translate(Math.round(player.x - player.facing * 7), Math.round(player.y - 7));
-    ctx.rotate(-player.facing * (0.4 + swing * 0.5));
-    ctx.scale(-player.facing, 1);
+    ctx.translate(Math.round(player.x + Math.cos(player.atkAng) * d), Math.round(player.y - 6 + Math.sin(player.atkAng) * d));
+    ctx.rotate(player.atkAng + Math.PI / 2);
+    ctx.drawImage(im, -im.width / 2, -im.height + 2); // grip at origin, tip leads
+    ctx.restore();
+  } else if (G.weapon === "whip" && attacking) {
+    // handle flicks toward the lash (the lash itself is a whip fx)
+    ctx.save();
+    ctx.translate(Math.round(player.x + Math.cos(player.atkAng) * 6), Math.round(player.y - 8));
+    ctx.rotate(player.atkAng + Math.PI / 2 + 0.4);
+    ctx.drawImage(im, -im.width / 2, -im.height + 3);
+    ctx.restore();
+  } else {
+    const swing = (wdef.ranged || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
+    ctx.save();
+    ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
+    ctx.rotate(player.facing * (wdef.ranged ? 0.15 : 0.5 + swing));
+    ctx.scale(player.facing, 1);
     ctx.drawImage(im, -2, -im.height + 4);
     ctx.restore();
+    if (G.weapon === "knives") { // off-hand knife
+      ctx.save();
+      ctx.translate(Math.round(player.x - player.facing * 7), Math.round(player.y - 7));
+      ctx.rotate(-player.facing * (0.4 + swing * 0.5));
+      ctx.scale(-player.facing, 1);
+      ctx.drawImage(im, -2, -im.height + 4);
+      ctx.restore();
+    }
   }
 }
 
@@ -1841,13 +1894,15 @@ function renderSelect(t) {
   drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], t, 6), VW / 2, 66, false, PLAYER_SCALE);
 
   selectRects = [];
-  const ids = Object.keys(WEAPONS);
+  const ids = CLASSES[G.cls].weapons;
   const pw = 200, ph = 46, gapx = 16, gapy = 10;
+  const cols = ids.length > 3 ? 2 : 1;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], w = WEAPONS[id];
     const unlocked = isUnlocked(w.unlock);
-    const col = i % 2, row = Math.floor(i / 2);
-    const x = VW / 2 - pw - gapx / 2 + col * (pw + gapx), y = 80 + row * (ph + gapy);
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = cols === 1 ? VW / 2 - pw / 2 : VW / 2 - pw - gapx / 2 + col * (pw + gapx);
+    const y = 80 + row * (ph + gapy);
     selectRects.push({ x, y, w: pw, h: ph, id, unlocked });
     ctx.fillStyle = unlocked ? "#241c2e" : "#161020";
     ctx.fillRect(x, y, pw, ph);
@@ -1871,7 +1926,7 @@ function renderSelect(t) {
   }
   ctx.textAlign = "center";
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText("click or press 1-6", VW / 2, VH - 10);
+  ctx.fillText(`${CLASSES[G.cls].name}'s arsenal — click or press 1-${ids.length}`, VW / 2, VH - 10);
 }
 
 // title / end screens -------------------------------------------------------
@@ -1991,7 +2046,7 @@ function handleKey(code) {
       if (id && isUnlocked(CLASSES[id].unlock)) { G.cls = id; G.state = "select"; }
     }
   } else if (G.state === "select") {
-    const ids = Object.keys(WEAPONS);
+    const ids = CLASSES[G.cls].weapons;
     const m = /^Digit([1-9])$/.exec(code);
     if (m) {
       const id = ids[+m[1] - 1];
