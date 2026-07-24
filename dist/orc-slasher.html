@@ -221,6 +221,7 @@ window.ASSETS = {
   "slash_f1": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAKCAYAAAC9vt6cAAAATUlEQVR4nGNgoCdomrevomnevgqyNO659OLE////X/////810YagayRaM/01YtNMcmA1zdtXQY5mFmRO8/z9vQwMDAx1SU4dJNlOCQAAdABvnydXQaYAAAAASUVORK5CYII=",
   "slash_f2": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAKCAYAAAC9vt6cAAAAQUlEQVR4nGNgoBdomrevAps4EzEa91x6cYIsG/dcenFiz6UXJ3DZTl2NyJpJ0ciCrJmBgYHBRU/CgiRb0Q0YegAABdwrme/luGYAAAAASUVORK5CYII=",
   "ui_key": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAHCAYAAAA8sqwkAAAAcElEQVR4nGNkYGBgkBCS+s+ABF68e8bIgAOwSAhJ/T+1SAVF0CyO4T8uTSwwhpzPIUYGBgaGR1vs/mOzFUMDMkC3EWHzHQYmGOfRFrv/MNPN4u4wmMXdgStCphlg1iNjZPEVDTr/YTRWa9EBzAAYDQBxHy2a4Wa5RgAAAABJRU5ErkJggg==",
+  "weapon_blast_dagger": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAkAAAAKCAYAAABmBXS+AAAASElEQVR4nGNgQAMSQlL/0cUwFBy58OA/ukImbIrTSupQTMSqCB2QpgjZ+Fk9Tbh1SAhJ/fcyUSLs8KyIu4TdtGvXfsKOxBaYAADPFgkscQhgAAAAAElFTkSuQmCC",
   "weapon_molotov": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAALCAYAAABCm8wlAAAAcklEQVR4nGNgQALvmhT+/7mU8B9ZjIkBDXzacIABqwIJIan/H0KWwNk4TdCa8IvhxbtnjFgVNGxZdVIrzOIuXhPQARPMTreKkJMMDAwMMkoyb5BNYUFWXcCyw5yBgYGhhEHnLmlW4ANw7yC7nIGBAe5VAANxJK7mHeXhAAAAAElFTkSuQmCC",
   "weapon_scythe": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAOCAYAAAAmL5yKAAAAk0lEQVR4nGNkgAIJIan/DFjAi3fPGLGJwwAjTPOafcewKghxssJrENyAlIo2BgYGBgYPNwecBmEzBEMA2SspFW1wA3EZwIQu8OLdM0aYwkd7psC9gAtgGIAMnrz6wsDAwMBgY6CAMyDxGiAjxoPiMrJdgA/gNcDrHUH9+A3YJkShAchhQJYBFIcBMS7AC3BlMGQAAHhcMSDXhr3QAAAAAElFTkSuQmCC",
   "weapon_shuriken": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAkAAAAJCAYAAADgkQYQAAAAPElEQVR4nGNgQAMSQlL/0cUwFBw5c+s/ukImdN27du3DNBVZd13bDBQaxVRkCWx80kzCZSLRvsOqEF0MAPGQSbZvUiiLAAAAAElFTkSuQmCC",
@@ -1153,7 +1154,7 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, missiles, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, missiles, daggers, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
@@ -1169,12 +1170,13 @@ const WEAPONS = {
   katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
   shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 5, atkSpd: 2.8, range: 125, arc: 0, star: true },
   spells: { name: "Arcane Arts", desc: "magic missile + fireball · shockwave · firebeam", sprite: "weapon_red_magic_staff", dmg: 10, atkSpd: 1, range: 165, arc: 0, spells: true },
+  blastdagger: { name: "Blast Dagger", desc: "thrown blade, arcane burst on impact", sprite: "weapon_blast_dagger", dmg: 8, atkSpd: 1.1, range: 130, arc: 0, blast: true },
 };
 
 const SPELLS = {
-  fire: { name: "Fireball", cd: 6 },
-  shock: { name: "Shockwave", cd: 8 },
-  beam: { name: "Firebeam", cd: 12 },
+  fire: { name: "Fireball", cd: 5 },
+  shock: { name: "Shockwave", cd: 7 },
+  beam: { name: "Firebeam", cd: 10 },
 };
 
 // classes -------------------------------------------------------------------
@@ -1195,8 +1197,8 @@ const CLASSES = {
     weapons: ["scythe", "knives"],
     mods: s => { s.dmg *= 1.10; s.lifesteal += 0.02; s.maxHp = 45; s.moveSpd *= 1.05; } },
   mage: { name: "Mage", anim: "mage", desc: "auto missile + 3 click-cast spells", unlock: "mage", price: 900,
-    weapons: ["spells"],
-    mods: s => { s.maxHp = 50; } },
+    weapons: ["spells", "blastdagger"],
+    mods: s => { s.maxHp = 55; } },
   monk: { name: "Monk", anim: "monk", desc: "dev tester — masters every weapon", devOnly: true,
     weapons: Object.keys(WEAPONS),
     mods: s => { s.maxHp = 65; } },
@@ -1313,7 +1315,7 @@ function newRun(weaponId) {
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; missiles = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; missiles = []; daggers = []; fx = []; texts = [];
   player.spellCd = { fire: 0, shock: 0, beam: 0 };
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
@@ -1676,6 +1678,35 @@ function playerStarAttack() {
   SFX.slash();
 }
 
+// blast dagger: auto-thrown spinning blade, arcane AoE burst where it lands
+function playerDaggerAttack() {
+  const st = player.stats;
+  const target = nearestEnemy(player, st.range);
+  if (!target) return;
+  player.atkCd = 1 / st.atkSpd;
+  const ang = Math.atan2(target.y - player.y, target.x - player.x);
+  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
+  player.atkAng = ang;
+  daggers.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 230, vy: Math.sin(ang) * 230, spin: 0, life: 0.65 });
+  SFX.slash();
+}
+
+function explodeDagger(d) {
+  const st = player.stats;
+  beep(320, 0.14, "square", 0.07, -160);
+  for (const e of [...enemies]) {
+    if (e.warmup > 0) continue;
+    if (Math.hypot(e.x - d.x, e.y - d.y) < 26 + e.r) {
+      const crit = Math.random() < st.crit;
+      damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+    }
+  }
+  for (let i = 0; i < 9; i++) {
+    fx.push({ kind: "spark", violet: true, x: d.x, y: d.y - 2, vx: rnd(-60, 60), vy: rnd(-70, -10), life: rnd(0.2, 0.45), max: 0.45 });
+  }
+  fx.push({ kind: "ring", x: d.x, y: d.y, life: 0.25, max: 0.25, r: 26, violet: true });
+}
+
 // the mage's normal attack: a small auto-fired magic missile, always ready
 function playerMissileAttack() {
   const st = player.stats;
@@ -1811,7 +1842,19 @@ function updatePlay(dt) {
   } else if (WEAPONS[G.weapon].spells) {
     for (const id of Object.keys(player.spellCd)) player.spellCd[id] = Math.max(0, player.spellCd[id] - dt);
     if (player.atkCd <= 0) playerMissileAttack();
+  } else if (WEAPONS[G.weapon].blast) {
+    if (player.atkCd <= 0) playerDaggerAttack();
   } else if (player.atkCd <= 0) playerMeleeAttack();
+
+  for (const d of [...daggers]) {
+    d.x += d.vx * dt; d.y += d.vy * dt; d.spin += dt * 18; d.life -= dt;
+    let boom = d.life <= 0;
+    for (const e of enemies) {
+      if (e.warmup > 0) continue;
+      if (dist(d, { x: e.x, y: e.y - 4 }) < e.r + 5) { boom = true; break; }
+    }
+    if (boom) { daggers.splice(daggers.indexOf(d), 1); explodeDagger(d); }
+  }
 
   for (const m of [...missiles]) {
     m.x += m.vx * dt; m.y += m.vy * dt; m.life -= dt; m.t += dt;
@@ -2147,6 +2190,12 @@ function renderWorld() {
     ctx.drawImage(im, -im.width / 2, -im.height / 2);
     ctx.restore();
   }
+  for (const d of daggers) {
+    ctx.save(); ctx.translate(Math.round(d.x), Math.round(d.y)); ctx.rotate(d.spin);
+    const im = IMG.weapon_blast_dagger;
+    ctx.drawImage(im, -im.width / 2, -im.height / 2);
+    ctx.restore();
+  }
   for (const m of missiles) {
     const wob = Math.sin(m.t * 26) * 1.5;
     const px2 = -m.vy, py2 = m.vx;
@@ -2189,12 +2238,14 @@ function renderWorld() {
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
     } else if (p.kind === "ring") {
       const pr = (1 - p.life / p.max) * p.r;
-      ctx.strokeStyle = `rgba(255,209,102,${p.life / p.max})`; ctx.lineWidth = 2;
+      ctx.strokeStyle = p.violet ? `rgba(180,140,255,${p.life / p.max})` : `rgba(255,209,102,${p.life / p.max})`; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = `rgba(255,255,255,${0.5 * p.life / p.max})`; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0, pr - 5), 0, Math.PI * 2); ctx.stroke();
     } else if (p.kind === "spark") {
-      ctx.fillStyle = `rgba(252,${140 + Math.round(90 * p.life / p.max)},50,${p.life / p.max})`;
+      ctx.fillStyle = p.violet
+        ? `rgba(${150 + Math.round(60 * p.life / p.max)},120,255,${p.life / p.max})`
+        : `rgba(252,${140 + Math.round(90 * p.life / p.max)},50,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
     } else if (p.kind === "slash") {
       const f = ANIM.slash[Math.min(2, Math.floor((1 - p.life / p.max) * 3))];
@@ -2276,10 +2327,11 @@ function drawPlayer() {
     ctx.drawImage(im, -im.width / 2, -im.height + 3);
     ctx.restore();
   } else {
-    const swing = (wdef.ranged || wdef.thrown || wdef.star || wdef.spells || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
+    const throwerPose = wdef.ranged || wdef.thrown || wdef.star || wdef.spells || wdef.blast;
+    const swing = (throwerPose || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
     ctx.save();
     ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
-    ctx.rotate(player.facing * ((wdef.ranged || wdef.thrown || wdef.star || wdef.spells) ? 0.15 : 0.5 + swing));
+    ctx.rotate(player.facing * (throwerPose ? 0.15 : 0.5 + swing));
     ctx.scale(player.facing, 1);
     ctx.drawImage(im, -2, -im.height + 4);
     ctx.restore();
@@ -2342,6 +2394,7 @@ function renderDarkness(cx, cy) {
   for (const m of molotovs) punch(m.x, m.y, 18, 0.7);
   for (const f of fireballs) punch(f.x, f.y, 30, 0.8);
   for (const m of missiles) punch(m.x, m.y, 14, 0.6);
+  for (const d of daggers) punch(d.x, d.y, 16, 0.6);
   for (const b of beams) {
     for (let i = 0; i < 4; i++) {
       punch(player.x + Math.cos(b.ang) * (20 + i * 38), player.y - 6 + Math.sin(b.ang) * (20 + i * 38), 26, 0.6);

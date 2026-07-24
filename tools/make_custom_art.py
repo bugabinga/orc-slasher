@@ -807,6 +807,27 @@ assassin("assassin_run_f1", ASN_LEGS_STAND, 0)
 assassin("assassin_run_f2", ASN_LEGS_B, 1)
 assassin("assassin_run_f3", ASN_LEGS_STAND, 0)
 
+BDG_PAL = {
+    "K": (24, 18, 26, 255),
+    "B": (196, 208, 224, 255),  # blade
+    "b": (126, 134, 152, 255),  # blade shade
+    "H": (74, 52, 34, 255),     # grip
+    "P": (180, 140, 255, 255),  # arcane gem
+    "p": (110, 70, 190, 255),   # gem shade
+}
+save_grid("weapon_blast_dagger", """
+....K....
+...KBK...
+...KBbK..
+...KBbK..
+...KBbK..
+..KKBKK..
+...KHK...
+...KPK...
+...KpK...
+....K....
+""", BDG_PAL)
+
 SHUR_PAL = {
     "K": (24, 18, 26, 255),
     "A": (196, 204, 218, 255),
