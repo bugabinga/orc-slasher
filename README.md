@@ -23,7 +23,7 @@ between waves. Survive to wave 10 and slay the **Orc Warchief**.
 | — | attack (auto-aims nearest orc) |
 | Space / Shift | dash (i-frames, 2s cooldown) |
 | 1-5 / click | choose your hero: Knight & Quasimodo (default), Barbarian & Nun (0.1% relic drop from bosses), Reaper (reach wave 10) |
-| 1-3 / click | class arsenal — Knight: sword/spear/bow · Barbarian: knives/spear/whip · Nun: whip/bow · Quasimodo: molotov/small knife · Reaper: scythe/knives |
+| 1-3 / click | class arsenal — Knight: sword/spear/bow · Barbarian: knives/spear/war axe · Nun: whip/bow · Quasimodo: molotov/small knife · Reaper: scythe/knives |
 | 1·2·3 / click | pick upgrade card at the campfire |
 | touch drag | virtual joystick (mobile) |
 

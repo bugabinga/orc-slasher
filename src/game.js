@@ -299,6 +299,7 @@ const WEAPONS = {
   knives: { name: "Twin Knives", desc: "fast stabs, short reach, +move", sprite: "weapon_knife", dmg: 5, atkSpd: 2.2, range: 27, arc: 1.35 },
   bow: { name: "Longbow", desc: "10 arrows, then 3s reload", sprite: "weapon_bow", dmg: 7, atkSpd: 1.8, range: 150, arc: 0, ranged: true, clip: 10, reload: 3 },
   whip: { name: "Whip", desc: "long lash, narrow snap", sprite: "weapon_whip", dmg: 6, atkSpd: 1.5, range: 60, arc: 0.55 },
+  axe: { name: "War Axe", desc: "heavy chop, wide arc", sprite: "weapon_waraxe", dmg: 13, atkSpd: 0.85, range: 34, arc: 1.5 },
   spear: { name: "Spear", desc: "long thrust, pierces a line", sprite: "weapon_spear", dmg: 9, atkSpd: 1.2, range: 55, arc: 0.45 },
   scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 15, atkSpd: 0.75, range: 44, arc: 2.4, unlock: "scythe" },
   molotov: { name: "Molotov", desc: "lobbed firebomb, burns the ground", sprite: "weapon_molotov", dmg: 12, atkSpd: 0.6, range: 130, arc: 0, thrown: true },
@@ -309,7 +310,7 @@ const WEAPONS = {
 const CLASSES = {
   knight: { name: "Knight", anim: "hero", desc: "balanced, dependable", weapons: ["sword", "spear", "bow"], mods: s => s },
   barbar: { name: "Barbarian", anim: "barbar", desc: "+25% dmg, +10% speed, takes +15% dmg", unlock: "barbar",
-    weapons: ["knives", "spear", "whip"],
+    weapons: ["knives", "spear", "axe"],
     mods: s => { s.dmg *= 1.25; s.moveSpd *= 1.10; s.armor = 1 - (1 - s.armor) * 1.15; s.maxHp = 70; } },
   nun: { name: "Nun", anim: "nun", desc: "+1.2 HP/s, +20% XP, -15% dmg", unlock: "nun",
     weapons: ["whip", "bow"],
