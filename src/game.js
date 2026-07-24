@@ -28,6 +28,12 @@ for (const [name, uri] of Object.entries(window.ASSETS)) {
 const ANIM = {
   hero_idle: ["knight_m_idle_f0", "knight_m_idle_f1", "knight_m_idle_f2", "knight_m_idle_f3"],
   hero_run: ["knight_m_run_f0", "knight_m_run_f1", "knight_m_run_f2", "knight_m_run_f3"],
+  barbar_idle: ["dwarf_m_idle_f0", "dwarf_m_idle_f1", "dwarf_m_idle_f2", "dwarf_m_idle_f3"],
+  barbar_run: ["dwarf_m_run_f0", "dwarf_m_run_f1", "dwarf_m_run_f2", "dwarf_m_run_f3"],
+  nun_idle: ["angel_idle_f0", "angel_idle_f1", "angel_idle_f2", "angel_idle_f3"],
+  nun_run: ["angel_run_f0", "angel_run_f1", "angel_run_f2", "angel_run_f3"],
+  reaper_idle: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
+  reaper_run: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
   goblin_idle: ["goblin_idle_f0", "goblin_idle_f1", "goblin_idle_f2", "goblin_idle_f3"],
   goblin_run: ["goblin_run_f0", "goblin_run_f1", "goblin_run_f2", "goblin_run_f3"],
   orc_warrior_idle: ["orc_warrior_idle_f0", "orc_warrior_idle_f1", "orc_warrior_idle_f2", "orc_warrior_idle_f3"],
@@ -221,6 +227,7 @@ const G = {
   state: "title", // title | play | campfire | gameover | victory
   t: 0, wave: 0, kills: 0, coins: 0, shake: 0, hitPause: 0,
   endless: false,
+  cls: "knight", weapon: "sword",
   cam: { x: 0, y: 0 },
 };
 
@@ -231,7 +238,27 @@ const WEAPONS = {
   sword: { name: "Knight Sword", desc: "steady swings, wide arc", sprite: "weapon_regular_sword", dmg: 10, atkSpd: 1.0, range: 36, arc: 1.15 },
   knives: { name: "Twin Knives", desc: "fast stabs, short reach, +move", sprite: "weapon_knife", dmg: 5, atkSpd: 2.2, range: 27, arc: 1.35 },
   bow: { name: "Longbow", desc: "10 arrows, then 3s reload", sprite: "weapon_bow", dmg: 7, atkSpd: 1.8, range: 150, arc: 0, ranged: true, clip: 10, reload: 3 },
+  whip: { name: "Whip", desc: "long lash, narrow snap", sprite: "weapon_whip", dmg: 6, atkSpd: 1.5, range: 60, arc: 0.55 },
+  spear: { name: "Spear", desc: "long thrust, pierces a line", sprite: "weapon_spear", dmg: 9, atkSpd: 1.2, range: 55, arc: 0.45 },
+  scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 15, atkSpd: 0.75, range: 44, arc: 2.4, unlock: "scythe" },
 };
+
+// classes -------------------------------------------------------------------
+const CLASSES = {
+  knight: { name: "Knight", anim: "hero", desc: "balanced, dependable", mods: s => s },
+  barbar: { name: "Barbarian", anim: "barbar", desc: "+25% dmg, +10% speed, takes +15% dmg", unlock: "barbar",
+    mods: s => { s.dmg *= 1.25; s.moveSpd *= 1.10; s.armor = 1 - (1 - s.armor) * 1.15; s.maxHp = 70; } },
+  nun: { name: "Nun", anim: "nun", desc: "+1.2 HP/s, +20% XP, -15% dmg", unlock: "nun",
+    mods: s => { s.regen += 1.2; s.xpGain *= 1.20; s.dmg *= 0.85; s.maxHp = 55; } },
+  reaper: { name: "Reaper", anim: "reaper", desc: "+20% dmg, 3% lifesteal, frail", unlock: "reaper",
+    mods: s => { s.dmg *= 1.20; s.lifesteal += 0.03; s.maxHp = 45; s.moveSpd *= 1.05; } },
+};
+
+// unlocks persist across runs (best-effort; storage may be unavailable)
+const UN = { barbar: false, nun: false, reaper: false, scythe: false };
+try { Object.assign(UN, JSON.parse(localStorage.getItem("orcslasher_unlocks") || "{}")); } catch (e) { /* no storage */ }
+function saveUnlocks() { try { localStorage.setItem("orcslasher_unlocks", JSON.stringify(UN)); } catch (e) { /* no storage */ } }
+function isUnlocked(key) { return !key || UN[key]; }
 
 function baseStats(weaponId) {
   const w = WEAPONS[weaponId];
@@ -246,9 +273,11 @@ function baseStats(weaponId) {
 function newRun(weaponId) {
   buildMap();
   G.weapon = weaponId;
+  const stats = baseStats(weaponId);
+  CLASSES[G.cls].mods(stats);
   player = {
-    x: WORLD_W / 2, y: WORLD_H / 2, r: 6, hp: 60, level: 1, xp: 0,
-    stats: baseStats(weaponId), banked: 0,
+    x: WORLD_W / 2, y: WORLD_H / 2, r: 6, hp: stats.maxHp, level: 1, xp: 0,
+    stats, banked: 0,
     facing: 1, moving: false, animT: 0,
     atkCd: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
@@ -307,6 +336,11 @@ function startWave(w) {
   spawnTimer = 0;
   texts.push({ x: player.x, y: player.y - 40, s: w === FINAL_WAVE ? "THE WARCHIEF COMES" : "WAVE " + w, life: 2.2, col: "#ffd166", big: true });
   if (w === FINAL_WAVE) SFX.bossRoar();
+  if (w >= 10 && (!UN.scythe || !UN.reaper)) {
+    UN.scythe = true; UN.reaper = true; saveUnlocks();
+    texts.push({ x: player.x, y: player.y - 56, s: "SCYTHE & REAPER UNLOCKED!", life: 3, col: "#b48cff", big: true });
+    SFX.level();
+  }
 }
 
 function spawnPointFor() {
@@ -467,6 +501,15 @@ function killEnemy(e) {
   const coinCount = e.big ? 3 : (Math.random() < 0.3 ? 1 : 0);
   for (let i = 0; i < coinCount; i++) coins.push({ x: e.x + rnd(-6, 6), y: e.y + rnd(-4, 4), t: rnd(0, 9), vx: rnd(-25, 25), vy: rnd(-50, -20) });
   if (Math.random() < (e.big ? 0.8 : 0.04)) flasks.push({ x: e.x, y: e.y, t: 0 });
+  if (e.big && Math.random() < 0.001) { // 0.1% relic drop from bosses
+    const locked = ["barbar", "nun"].filter(c => !UN[c]);
+    if (locked.length) {
+      const c = pick(locked);
+      UN[c] = true; saveUnlocks();
+      texts.push({ x: e.x, y: e.y - 40, s: `RELIC! ${CLASSES[c].name.toUpperCase()} UNLOCKED!`, life: 4, col: "#b48cff", big: true });
+      SFX.level();
+    }
+  }
   if (e.boss) {
     G.shake = 12;
     if (!G.endless) { G.state = "victory"; SFX.waveClear(); }
@@ -803,7 +846,7 @@ function renderWorld() {
 const PLAYER_SCALE = 1.3;
 function drawPlayer() {
   const st = player.stats;
-  const list = player.moving ? ANIM.hero_run : ANIM.hero_idle;
+  const list = ANIM[CLASSES[G.cls].anim + (player.moving ? "_run" : "_idle")];
   if (player.flash > 0) { player.flash -= 1 / 60; ctx.filter = "brightness(2.5)"; }
   if (player.hurtCd > 0.3) ctx.globalAlpha = 0.6;
   drawSprite(animFrame(list, player.animT), player.x, player.y + 5, player.facing < 0, PLAYER_SCALE);
@@ -950,7 +993,7 @@ function renderCampfire(dt) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
 
   drawSprite(animFrame(ANIM.campfire, campfire.t, 8), VW / 2, 88, false, 2);
-  drawSprite(animFrame(ANIM.hero_idle, campfire.t, 6), VW / 2 - 34, 86, false);
+  drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], campfire.t, 6), VW / 2 - 34, 86, false);
   ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd166";
   ctx.fillText(`WAVE ${G.wave} CLEARED`, VW / 2, 26);
   ctx.font = "8px monospace"; ctx.fillStyle = "#cfc6de";
@@ -1057,42 +1100,91 @@ function wrapText(text, x, y, maxW, lh) {
   ctx.fillText(line, x, yy);
 }
 
-// weapon select --------------------------------------------------------------
-let selectRects = [];
-function renderSelect(t) {
+// class select ---------------------------------------------------------------
+let clsRects = [];
+function renderClassSelect(t) {
   ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
   const g = ctx.createRadialGradient(VW / 2, 60, 8, VW / 2, 60, 140);
   g.addColorStop(0, "rgba(252,150,50,0.15)"); g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
   ctx.textAlign = "center";
   ctx.font = "bold 14px monospace"; ctx.fillStyle = "#ffd166";
-  ctx.fillText("CHOOSE YOUR WEAPON", VW / 2, 36);
-  drawSprite(animFrame(ANIM.hero_idle, t, 6), VW / 2, 78, false, PLAYER_SCALE);
+  ctx.fillText("CHOOSE YOUR HERO", VW / 2, 36);
+
+  clsRects = [];
+  const ids = Object.keys(CLASSES);
+  const cw = 102, chh = 140, gap = 14;
+  const total = ids.length * cw + (ids.length - 1) * gap;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i], c = CLASSES[id];
+    const unlocked = isUnlocked(c.unlock);
+    const x = VW / 2 - total / 2 + i * (cw + gap), y = 56;
+    clsRects.push({ x, y, w: cw, h: chh, id, unlocked });
+    ctx.drawImage(IMG.card, x, y, cw, chh);
+    drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + cw / 2, y + 62, false, 1.4);
+    ctx.font = "bold 9px monospace"; ctx.fillStyle = "#3a2c18";
+    ctx.fillText(c.name, x + cw / 2, y + 84);
+    ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
+    wrapText(c.desc, x + cw / 2, y + 98, cw - 14, 9);
+    ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
+    ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 12);
+    if (!unlocked) {
+      ctx.fillStyle = "rgba(11,9,16,0.88)"; ctx.fillRect(x + 2, y + 2, cw - 4, chh - 4);
+      drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + cw / 2, y + 62, false, 1.4, 0.25);
+      ctx.font = "bold 9px monospace"; ctx.fillStyle = "#8f84a8"; ctx.textAlign = "center";
+      ctx.fillText("LOCKED", x + cw / 2, y + 88);
+      ctx.font = "6px monospace"; ctx.fillStyle = "#6f6485";
+      wrapText(id === "reaper" ? "reach wave 10" : "0.1% relic drop from bosses", x + cw / 2, y + 102, cw - 12, 8);
+    }
+  }
+  ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
+  ctx.fillText("click or press 1·2·3·4", VW / 2, VH - 12);
+}
+
+// weapon select --------------------------------------------------------------
+let selectRects = [];
+function renderSelect(t) {
+  ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
+  const g = ctx.createRadialGradient(VW / 2, 46, 8, VW / 2, 46, 140);
+  g.addColorStop(0, "rgba(252,150,50,0.15)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+  ctx.textAlign = "center";
+  ctx.font = "bold 14px monospace"; ctx.fillStyle = "#ffd166";
+  ctx.fillText("CHOOSE YOUR WEAPON", VW / 2, 30);
+  drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], t, 6), VW / 2, 66, false, PLAYER_SCALE);
 
   selectRects = [];
   const ids = Object.keys(WEAPONS);
-  const cw = 110, chh = 130, gap = 24;
-  const total = ids.length * cw + (ids.length - 1) * gap;
+  const pw = 200, ph = 46, gapx = 16, gapy = 10;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], w = WEAPONS[id];
-    const x = VW / 2 - total / 2 + i * (cw + gap), y = 96;
-    selectRects.push({ x, y, w: cw, h: chh, id });
-    ctx.drawImage(IMG.card, x, y, cw, chh);
+    const unlocked = isUnlocked(w.unlock);
+    const col = i % 2, row = Math.floor(i / 2);
+    const x = VW / 2 - pw - gapx / 2 + col * (pw + gapx), y = 80 + row * (ph + gapy);
+    selectRects.push({ x, y, w: pw, h: ph, id, unlocked });
+    ctx.fillStyle = unlocked ? "#241c2e" : "#161020";
+    ctx.fillRect(x, y, pw, ph);
+    ctx.strokeStyle = unlocked ? "#8a6a30" : "#3a3346"; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, pw - 1, ph - 1);
     const icon = IMG[w.sprite];
-    const s = 3;
-    ctx.drawImage(icon, Math.round(x + cw / 2 - icon.width * s / 2 - (id === "knives" ? 12 : 0)), y + 16, icon.width * s, icon.height * s);
-    if (id === "knives") ctx.drawImage(icon, Math.round(x + cw / 2 + 4), y + 16, icon.width * s, icon.height * s);
-    ctx.font = "bold 9px monospace"; ctx.fillStyle = "#3a2c18";
-    ctx.fillText(w.name, x + cw / 2, y + 82);
-    ctx.font = "7px monospace"; ctx.fillStyle = "#584426";
-    wrapText(w.desc, x + cw / 2, y + 95, cw - 16, 9);
-    ctx.fillStyle = "#8a6a30";
-    ctx.fillText(w.ranged ? `dmg ${w.dmg} · ${w.atkSpd}/s · ${w.clip} arrows` : `dmg ${w.dmg} · ${w.atkSpd}/s · reach ${w.range}`, x + cw / 2, y + 118);
-    ctx.font = "bold 8px monospace"; ctx.fillStyle = "#a5834a";
-    ctx.fillText(`[${i + 1}]`, x + cw / 2, y + 12);
+    if (icon && icon.complete) {
+      const s = Math.min(2, 36 / icon.height);
+      if (!unlocked) ctx.globalAlpha = 0.35;
+      ctx.drawImage(icon, Math.round(x + 20 - icon.width * s / 2), Math.round(y + ph / 2 - icon.height * s / 2), Math.round(icon.width * s), Math.round(icon.height * s));
+      if (id === "knives") ctx.drawImage(icon, Math.round(x + 28 - icon.width * s / 2), Math.round(y + ph / 2 - icon.height * s / 2), Math.round(icon.width * s), Math.round(icon.height * s));
+      ctx.globalAlpha = 1;
+    }
+    ctx.textAlign = "left";
+    ctx.font = "bold 8px monospace"; ctx.fillStyle = unlocked ? "#e8dfc8" : "#57506b";
+    ctx.fillText(`[${i + 1}] ${w.name}`, x + 40, y + 14);
+    ctx.font = "7px monospace"; ctx.fillStyle = unlocked ? "#8f84a8" : "#453f58";
+    ctx.fillText(unlocked ? w.desc : "locked — reach wave 10", x + 40, y + 26);
+    ctx.fillStyle = unlocked ? "#ffd166" : "#453f58";
+    ctx.fillText(w.ranged ? `dmg ${w.dmg} · ${w.atkSpd}/s · ${w.clip} arrows` : `dmg ${w.dmg} · ${w.atkSpd}/s · reach ${w.range}`, x + 40, y + 38);
   }
+  ctx.textAlign = "center";
   ctx.font = "7px monospace"; ctx.fillStyle = "#6f6485";
-  ctx.fillText("click or press 1·2·3", VW / 2, VH - 12);
+  ctx.fillText("click or press 1-6", VW / 2, VH - 10);
 }
 
 // title / end screens -------------------------------------------------------
@@ -1189,7 +1281,7 @@ function renderEnd(victory, t) {
   ctx.font = "9px monospace"; ctx.fillStyle = "#cfc6de";
   ctx.fillText(`wave ${G.wave} · ${G.kills} orcs slain · ${G.coins} gold · level ${player ? player.level : 1}`, VW / 2, 112);
   if (victory) {
-    drawSprite(animFrame(ANIM.hero_idle, t, 6), VW / 2 - 12, 150);
+    drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], t, 6), VW / 2 - 12, 150);
     drawSprite(animFrame(ANIM.campfire, t, 8), VW / 2 + 12, 150);
     ctx.font = "8px monospace"; ctx.fillStyle = "#ffd166";
     ctx.fillText("the cave is quiet. the fire is warm.", VW / 2, 168);
@@ -1203,12 +1295,21 @@ function renderEnd(victory, t) {
 
 // ------------------------------------------------------------- input glue --
 function handleKey(code) {
-  if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "select"; }
-  else if (G.state === "select") {
+  if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "cls"; }
+  else if (G.state === "cls") {
+    const ids = Object.keys(CLASSES);
+    const m = /^Digit([1-9])$/.exec(code);
+    if (m) {
+      const id = ids[+m[1] - 1];
+      if (id && isUnlocked(CLASSES[id].unlock)) { G.cls = id; G.state = "select"; }
+    }
+  } else if (G.state === "select") {
     const ids = Object.keys(WEAPONS);
-    if (code === "Digit1") newRun(ids[0]);
-    if (code === "Digit2") newRun(ids[1]);
-    if (code === "Digit3" && ids[2]) newRun(ids[2]);
+    const m = /^Digit([1-9])$/.exec(code);
+    if (m) {
+      const id = ids[+m[1] - 1];
+      if (id && isUnlocked(WEAPONS[id].unlock)) newRun(id);
+    }
   } else if (G.state === "campfire") {
     if (code === "Digit1") pickCard(0);
     if (code === "Digit2") pickCard(1);
@@ -1217,23 +1318,31 @@ function handleKey(code) {
     if (code === "KeyH") shopHeal();
     if (code === "KeyB") shopExtraPick();
     if (code === "Enter" && campfire && campfire.picksLeft <= 0) leaveCampfire();
-  } else if (G.state === "gameover" && code === "Enter") { cardCounts = {}; G.state = "select"; }
+  } else if (G.state === "gameover" && code === "Enter") { cardCounts = {}; G.state = "cls"; }
   else if (G.state === "victory") {
     if (code === "KeyE") { G.endless = true; G.state = "play"; enterCampfire(); }
-    if (code === "Enter") { cardCounts = {}; G.state = "select"; }
+    if (code === "Enter") { cardCounts = {}; G.state = "cls"; }
   }
 }
 
 function handleClick(x, y) {
   audio();
-  if (G.state === "title") { G.state = "select"; return true; }
-  if (G.state === "select") {
-    for (const r of selectRects) {
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) { newRun(r.id); return true; }
+  if (G.state === "title") { G.state = "cls"; return true; }
+  if (G.state === "cls") {
+    for (const r of clsRects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h && r.unlocked) {
+        G.cls = r.id; G.state = "select"; return true;
+      }
     }
     return true;
   }
-  if (G.state === "gameover") { cardCounts = {}; G.state = "select"; return true; }
+  if (G.state === "select") {
+    for (const r of selectRects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h && r.unlocked) { newRun(r.id); return true; }
+    }
+    return true;
+  }
+  if (G.state === "gameover") { cardCounts = {}; G.state = "cls"; return true; }
   if (G.state === "victory") { G.endless = true; G.state = "play"; enterCampfire(); return true; }
   if (G.state === "campfire") {
     for (const r of shopRects) {
@@ -1280,6 +1389,7 @@ function frame(now) {
   }
 
   if (G.state === "title") renderTitle(now / 1000);
+  else if (G.state === "cls") renderClassSelect(now / 1000);
   else if (G.state === "select") renderSelect(now / 1000);
   else if (G.state === "play") {
     updatePlay(dt);
