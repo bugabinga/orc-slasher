@@ -63,6 +63,8 @@ const ANIM = {
   shamanking_idle: ["orc_shamanking_idle_f0", "orc_shamanking_idle_f1", "orc_shamanking_idle_f2", "orc_shamanking_idle_f3"],
   shamanking_run: ["orc_shamanking_run_f0", "orc_shamanking_run_f1", "orc_shamanking_run_f2", "orc_shamanking_run_f3"],
   campfire: ["campfire_f0", "campfire_f1", "campfire_f2", "campfire_f3"],
+  mushroom: ["mushroom_glow_f0", "mushroom_glow_f1"],
+  king: ["hanging_king_f0", "hanging_king_f1"],
   gem: ["xp_gem_f0", "xp_gem_f1"],
   coin: ["coin_f0", "coin_f1", "coin_f2", "coin_f3"],
   bolt: ["shaman_bolt_f0", "shaman_bolt_f1"],
@@ -247,43 +249,101 @@ function animFrame(list, t, fps = 8) {
 let floorCanvas = null;
 let solids = []; // {x,y,w,h} world-space rects
 
+let mushrooms = [], kingPos = null;
+
 function buildMap() {
   solids = [];
+  mushrooms = [];
   floorCanvas = document.createElement("canvas");
   floorCanvas.width = WORLD_W; floorCanvas.height = WORLD_H + 8;
   const fc = floorCanvas.getContext("2d");
   fc.imageSmoothingEnabled = false;
-  const floorNames = ["floor_1", "floor_1", "floor_1", "floor_1", "floor_2", "floor_3", "floor_4", "floor_5", "floor_6", "floor_7", "floor_8"];
+
+  // rocky cave outline: border depth undulates, so no straight walls
+  const rock = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(false));
+  const s1 = rnd(0, 9), s2 = rnd(0, 9), s3 = rnd(0, 9), s4 = rnd(0, 9);
+  const depth = (i, seed) => clamp(Math.round(2.2 + Math.sin(i * 0.55 + seed) * 1.1 + Math.sin(i * 0.23 + seed * 2.7) * 0.9 + rnd(-0.3, 0.3)), 1, 4);
+  const dTop = [], dBot = [], dL = [], dR = [];
+  for (let tx = 0; tx < MAP_W; tx++) { dTop[tx] = depth(tx, s1); dBot[tx] = depth(tx, s2); }
+  for (let ty = 0; ty < MAP_H; ty++) { dL[ty] = depth(ty, s3); dR[ty] = depth(ty, s4); }
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      fc.drawImage(IMG[pick(floorNames)], tx * TILE, ty * TILE);
+      rock[ty][tx] = ty < dTop[tx] || ty >= MAP_H - dBot[tx] || tx < dL[ty] || tx >= MAP_W - dR[ty];
     }
   }
-  // walls: top row is wall face, ring of solids around arena
-  for (let tx = 0; tx < MAP_W; tx++) {
-    fc.drawImage(IMG.wall_top_mid, tx * TILE, -8);
-    fc.drawImage(IMG.wall_mid, tx * TILE, 8);
-    if (tx % 7 === 3) fc.drawImage(IMG[tx % 14 === 3 ? "wall_banner_red" : "wall_banner_green"], tx * TILE, 8);
-    fc.drawImage(IMG.wall_top_mid, tx * TILE, WORLD_H - TILE);
+  // interior rock outcrops, kept away from the center spawn
+  for (let i = 0; i < 7; i++) {
+    const bx = irnd(7, MAP_W - 8), by = irnd(6, MAP_H - 7), br = rnd(1.2, 2.4);
+    if (Math.abs(bx - MAP_W / 2) < 7 && Math.abs(by - MAP_H / 2) < 5) continue;
+    for (let ty = Math.max(1, by - 3); ty < Math.min(MAP_H - 1, by + 4); ty++) {
+      for (let tx = Math.max(1, bx - 3); tx < Math.min(MAP_W - 1, bx + 4); tx++) {
+        if (Math.hypot(tx - bx, ty - by) <= br + rnd(-0.3, 0.3)) rock[ty][tx] = true;
+      }
+    }
   }
+  // the king's alcove on the east wall: deep rock behind, clear floor in front
+  const kty = Math.floor(MAP_H / 2);
+  for (let ty = kty - 2; ty <= kty + 2; ty++) {
+    for (let tx = MAP_W - 3; tx < MAP_W; tx++) rock[ty][tx] = true;
+    for (let tx = MAP_W - 7; tx < MAP_W - 3; tx++) rock[ty][tx] = false;
+  }
+  kingPos = { x: (MAP_W - 3) * TILE + 8, y: (kty + 1) * TILE + 2 };
+
+  // draw tiles
   for (let ty = 0; ty < MAP_H; ty++) {
-    fc.drawImage(IMG.wall_left, 0, ty * TILE);
-    fc.drawImage(IMG.wall_right, WORLD_W - TILE, ty * TILE);
-  }
-  solids.push({ x: 0, y: 0, w: WORLD_W, h: TILE + 8 });          // top
-  solids.push({ x: 0, y: WORLD_H - TILE, w: WORLD_W, h: TILE }); // bottom
-  solids.push({ x: 0, y: 0, w: TILE, h: WORLD_H });              // left
-  solids.push({ x: WORLD_W - TILE, y: 0, w: TILE, h: WORLD_H }); // right
-  // scattered crates + bones
-  for (let i = 0; i < 10; i++) {
-    const tx = irnd(3, MAP_W - 4), ty = irnd(4, MAP_H - 4);
-    if (Math.abs(tx - MAP_W / 2) < 4 && Math.abs(ty - MAP_H / 2) < 4) continue;
-    if (i < 6) {
-      fc.drawImage(IMG.crate, tx * TILE, ty * TILE);
-      solids.push({ x: tx * TILE + 1, y: ty * TILE + 2, w: 14, h: 13 });
-    } else {
-      fc.drawImage(IMG.skull, tx * TILE, ty * TILE);
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (rock[ty][tx]) {
+        fc.drawImage(IMG[`cave_wall_${(tx * 7 + ty * 13) % 2}`], tx * TILE, ty * TILE);
+      } else {
+        fc.drawImage(IMG[`cave_floor_${(tx * 5 + ty * 11 + irnd(0, 1)) % 4}`], tx * TILE, ty * TILE);
+      }
     }
+  }
+  // lit rim where rock meets floor below — sells the depth
+  fc.fillStyle = "rgba(96,80,86,0.5)";
+  for (let ty = 0; ty < MAP_H - 1; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      if (rock[ty][tx] && !rock[ty + 1][tx]) fc.fillRect(tx * TILE, ty * TILE + TILE - 2, TILE, 2);
+    }
+  }
+  // solids: merge horizontal runs of rock per row
+  for (let ty = 0; ty < MAP_H; ty++) {
+    let run = -1;
+    for (let tx = 0; tx <= MAP_W; tx++) {
+      const r = tx < MAP_W && rock[ty][tx];
+      if (r && run < 0) run = tx;
+      else if (!r && run >= 0) {
+        solids.push({ x: run * TILE, y: ty * TILE, w: (tx - run) * TILE, h: TILE });
+        run = -1;
+      }
+    }
+  }
+
+  // decorations on open floor
+  const freeTile = () => {
+    for (let i = 0; i < 40; i++) {
+      const tx = irnd(3, MAP_W - 4), ty = irnd(3, MAP_H - 4);
+      if (!rock[ty][tx] && !rock[ty + 1] [tx] && (Math.abs(tx - MAP_W / 2) > 4 || Math.abs(ty - MAP_H / 2) > 4)) return { tx, ty };
+    }
+    return null;
+  };
+  for (let i = 0; i < 5; i++) { // blocking stalagmites
+    const t = freeTile();
+    if (!t) continue;
+    fc.drawImage(IMG.stalagmite_big, t.tx * TILE + 2, t.ty * TILE + 3);
+    solids.push({ x: t.tx * TILE + 3, y: t.ty * TILE + 7, w: 10, h: 7 });
+  }
+  for (let i = 0; i < 6; i++) {
+    const t = freeTile();
+    if (t) fc.drawImage(IMG.stalagmite_small, t.tx * TILE + 4, t.ty * TILE + 6);
+  }
+  for (let i = 0; i < 5; i++) {
+    const t = freeTile();
+    if (t) fc.drawImage(IMG[i % 2 ? "bone_pile" : "skull"], t.tx * TILE + 2, t.ty * TILE + 5);
+  }
+  for (let i = 0; i < 7; i++) { // glowing mushrooms are drawn live (they flicker)
+    const t = freeTile();
+    if (t) mushrooms.push({ x: t.tx * TILE + 8, y: t.ty * TILE + 12, t: rnd(0, 9) });
   }
 }
 
@@ -540,15 +600,16 @@ function startWave(w) {
 }
 
 function spawnPointFor() {
-  // random point near an edge, away from the player
-  for (let i = 0; i < 24; i++) {
+  const blocked = (x, y) => solids.some(s => x > s.x - 6 && x < s.x + s.w + 6 && y > s.y - 6 && y < s.y + s.h + 6);
+  // random point near an edge, away from the player and out of the rock
+  for (let i = 0; i < 40; i++) {
     const side = irnd(0, 3);
     let x, y;
-    if (side === 0) { x = rnd(TILE * 2, WORLD_W - TILE * 2); y = rnd(TILE * 2.5, TILE * 4); }
-    else if (side === 1) { x = rnd(TILE * 2, WORLD_W - TILE * 2); y = rnd(WORLD_H - TILE * 4, WORLD_H - TILE * 2); }
-    else if (side === 2) { x = rnd(TILE * 2, TILE * 4); y = rnd(TILE * 3, WORLD_H - TILE * 2); }
-    else { x = rnd(WORLD_W - TILE * 4, WORLD_W - TILE * 2); y = rnd(TILE * 3, WORLD_H - TILE * 2); }
-    if (dist({ x, y }, player) > 90) return { x, y };
+    if (side === 0) { x = rnd(TILE * 3, WORLD_W - TILE * 3); y = rnd(TILE * 3, TILE * 6); }
+    else if (side === 1) { x = rnd(TILE * 3, WORLD_W - TILE * 3); y = rnd(WORLD_H - TILE * 6, WORLD_H - TILE * 3); }
+    else if (side === 2) { x = rnd(TILE * 3, TILE * 6); y = rnd(TILE * 3, WORLD_H - TILE * 3); }
+    else { x = rnd(WORLD_W - TILE * 6, WORLD_W - TILE * 3); y = rnd(TILE * 3, WORLD_H - TILE * 3); }
+    if (dist({ x, y }, player) > 90 && !blocked(x, y)) return { x, y };
   }
   return { x: TILE * 3, y: TILE * 3 };
 }
@@ -1223,10 +1284,23 @@ function updatePlay(dt) {
     }
   }
 
+  // -- the king bleeds
+  if (kingPos) {
+    if (Math.random() < dt * 0.9) {
+      fx.push({ kind: "drip", x: kingPos.x + rnd(-3, 3), y: kingPos.y - rnd(4, 14), life: 0.5, max: 0.5 });
+    }
+    if (!G.kingSeen && dist(player, kingPos) < 70) {
+      G.kingSeen = true;
+      texts.push({ x: kingPos.x - 90, y: kingPos.y - 40, s: "THE KING… WE CAME TOO LATE", life: 3.5, col: "#c9c0da", big: true });
+      beep(110, 0.5, "sine", 0.06, -40);
+    }
+  }
+
   // -- fx / texts
   for (const p of [...fx]) {
     p.life -= dt;
     if (p.kind === "blood" || p.kind === "spark") { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; }
+    if (p.kind === "drip") p.y += 55 * dt;
     if (p.life <= 0) fx.splice(fx.indexOf(p), 1);
   }
   for (const t of [...texts]) {
@@ -1283,6 +1357,17 @@ function renderWorld() {
   ctx.save();
   ctx.translate(-Math.round(cx), -Math.round(cy));
   ctx.drawImage(floorCanvas, 0, 0);
+
+  // glowing mushrooms (flickering, so drawn live)
+  for (const m of mushrooms) drawSprite(animFrame(ANIM.mushroom, G.t + m.t, 3), m.x, m.y);
+  // the hanged king on the east wall
+  if (kingPos) {
+    ctx.fillStyle = "rgba(110,20,26,0.75)"; // blood pool
+    ctx.beginPath();
+    ctx.ellipse(kingPos.x, kingPos.y + 3, 8, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    drawSprite(animFrame(ANIM.king, G.t, 1.4), kingPos.x, kingPos.y);
+  }
 
   // burning ground under everything
   for (const f of firePatches) {
@@ -1391,6 +1476,9 @@ function renderWorld() {
     if (p.kind === "blood") {
       ctx.fillStyle = `rgba(110,180,60,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
+    } else if (p.kind === "drip") {
+      ctx.fillStyle = `rgba(200,40,45,${p.life / p.max})`;
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 2);
     } else if (p.kind === "ring") {
       const pr = (1 - p.life / p.max) * p.r;
       ctx.strokeStyle = p.violet ? `rgba(180,140,255,${p.life / p.max})` : `rgba(255,209,102,${p.life / p.max})`; ctx.lineWidth = 2;
@@ -1550,6 +1638,8 @@ function renderDarkness(cx, cy) {
   for (const f of fireballs) punch(f.x, f.y, 30, 0.8);
   for (const m of missiles) punch(m.x, m.y, 14, 0.6);
   for (const d of daggers) punch(d.x, d.y, 16, 0.6);
+  for (const m of mushrooms) punch(m.x, m.y - 3, 22, 0.55);
+  if (kingPos) punch(kingPos.x, kingPos.y - 12, 36, 0.5);
   for (const b of beams) {
     for (let i = 0; i < 4; i++) {
       punch(player.x + Math.cos(b.ang) * (20 + i * 38), player.y - 6 + Math.sin(b.ang) * (20 + i * 38), 26, 0.6);
