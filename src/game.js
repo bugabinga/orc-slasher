@@ -771,6 +771,8 @@ function rollRarity(luck) {
   return "common";
 }
 
+const cardsAvailable = () => CARD_POOL.some(c => (cardCounts[c.id] || 0) < c.max);
+
 function drawThreeCards() {
   const avail = CARD_POOL.filter(c => (cardCounts[c.id] || 0) < c.max);
   const opts = [];
@@ -795,7 +797,8 @@ function enterCampfire() {
   player.hp = Math.min(player.stats.maxHp, player.hp + Math.round((player.stats.maxHp - player.hp) * (0.4 + player.stats.wind)));
   campfire = {
     t: 0,
-    picksLeft: Math.max(1, player.banked), // always at least one card by the fire
+    // at least one card by the fire — unless every card is already maxed
+    picksLeft: cardsAvailable() ? Math.max(1, player.banked) : 0,
     cards: drawThreeCards(),
     chosen: -1,
     rerollCost: 3, pickCost: 10,
@@ -815,7 +818,10 @@ function pickCard(i) {
   player.hp = Math.min(player.hp, player.stats.maxHp);
   SFX.card();
   campfire.picksLeft--;
-  if (campfire.picksLeft > 0) campfire.cards = drawThreeCards();
+  if (campfire.picksLeft > 0) {
+    campfire.cards = drawThreeCards();
+    if (!campfire.cards.length) campfire.picksLeft = 0; // pool exhausted mid-rest
+  }
 }
 
 function leaveCampfire() {
@@ -844,6 +850,7 @@ function shopHeal() {
 }
 function shopExtraPick() {
   if (!campfire) return;
+  if (!cardsAvailable()) return toast("every card is already maxed out");
   if (G.coins < campfire.pickCost) return toast("not enough gold");
   G.coins -= campfire.pickCost;
   campfire.pickCost += 5;
@@ -1967,6 +1974,8 @@ function renderPauseOverlay(t) {
 let cardRects = [], shopRects = [], nextRect = null;
 function renderCampfire(dt) {
   campfire.t += dt;
+  // safety net: never strand the player with picks left but nothing to pick
+  if (campfire.picksLeft > 0 && campfire.cards.length === 0) campfire.picksLeft = 0;
   ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
 
   // fire glow
