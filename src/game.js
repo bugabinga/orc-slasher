@@ -64,6 +64,8 @@ const ANIM = {
   cave_goblin_run: ["cave_goblin_run_f0", "cave_goblin_run_f1", "cave_goblin_run_f2", "cave_goblin_run_f3"],
   soulcaller_idle: ["orc_soulcaller_idle_f0", "orc_soulcaller_idle_f1", "orc_soulcaller_idle_f2", "orc_soulcaller_idle_f3"],
   soulcaller_run: ["orc_soulcaller_run_f0", "orc_soulcaller_run_f1", "orc_soulcaller_run_f2", "orc_soulcaller_run_f3"],
+  orcgod_idle: ["orc_god_idle_f0", "orc_god_idle_f1", "orc_god_idle_f2", "orc_god_idle_f3"],
+  orcgod_run: ["orc_god_run_f0", "orc_god_run_f1", "orc_god_run_f2", "orc_god_run_f3"],
   butcher_idle: ["orc_butcher_idle_f0", "orc_butcher_idle_f1", "orc_butcher_idle_f2", "orc_butcher_idle_f3"],
   butcher_run: ["orc_butcher_run_f0", "orc_butcher_run_f1", "orc_butcher_run_f2", "orc_butcher_run_f3"],
   shamanking_idle: ["orc_shamanking_idle_f0", "orc_shamanking_idle_f1", "orc_shamanking_idle_f2", "orc_shamanking_idle_f3"],
@@ -422,7 +424,7 @@ const G = {
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, missiles, daggers, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, missiles, daggers, bossRings, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
 const WEAPONS = {
@@ -583,7 +585,7 @@ function newRun(weaponId) {
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; missiles = []; daggers = []; fx = []; texts = [];
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; missiles = []; daggers = []; bossRings = []; fx = []; texts = [];
   player.spellCd = { fire: 0, shock: 0, beam: 0 };
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
@@ -612,6 +614,9 @@ function bossLine(type) {
   if (type === "orc_soulcaller") {
     return "He raises the dead… stay strong, for the King!";
   }
+  if (type === "orc_god") {
+    return "Their god walks… but my King watches over me!";
+  }
   return "A false king of shamans… mine was worth ten of you.";
 }
 
@@ -636,10 +641,11 @@ const E_TYPES = {
   orc_butcher: { anim: "butcher", hp: 300, spd: 32, dmg: 20, xp: 20, r: 10, scale: 2, big: true, bossBar: true, charge: true, score: 30 },
   orc_shamanking: { anim: "shamanking", hp: 340, spd: 26, dmg: 10, xp: 25, r: 8, scale: 2, big: true, bossBar: true, ranged: true, king: true, score: 40 },
   orc_soulcaller: { anim: "soulcaller", hp: 380, spd: 24, dmg: 14, xp: 30, r: 8, scale: 2, big: true, bossBar: true, souls: true, score: 45 },
+  orc_god: { anim: "orcgod", hp: 900, spd: 20, dmg: 26, xp: 80, r: 12, scale: 2.2, big: true, bossBar: true, god: true, score: 100 },
 };
 
-const BOSS_CYCLE = ["orc_butcher", "warchief", "orc_soulcaller", "orc_shamanking"];
-const BOSS_NAMES = { orc_butcher: "THE BUTCHER", warchief: "THE WARCHIEF", orc_soulcaller: "THE SOULCALLER", orc_shamanking: "THE SHAMAN KING" };
+const BOSS_CYCLE = ["orc_butcher", "warchief", "orc_soulcaller", "orc_god", "orc_shamanking"];
+const BOSS_NAMES = { orc_butcher: "THE BUTCHER", warchief: "THE WARCHIEF", orc_soulcaller: "THE SOULCALLER", orc_god: "GROMMOK, THE ORC GOD", orc_shamanking: "THE SHAMAN KING" };
 const bossFor = w => BOSS_CYCLE[(Math.floor(w / 5) - 1 + BOSS_CYCLE.length) % BOSS_CYCLE.length];
 
 function waveComposition(w) {
@@ -709,7 +715,8 @@ function spawnEnemy(type, at) {
     spd: t.spd * (1 + 0.02 * (G.wave - 1)) * rnd(0.9, 1.1),
     dmg: t.dmg * (1 + 0.06 * (G.wave - 1)),
     xp: t.xp, ranged: !!t.ranged, rage: !!t.rage, big: !!t.big, boss: !!t.boss,
-    bossBar: !!t.bossBar, charge: !!t.charge, king: !!t.king, souls: !!t.souls, ghost: !!t.ghost,
+    bossBar: !!t.bossBar, charge: !!t.charge, king: !!t.king, souls: !!t.souls, ghost: !!t.ghost, god: !!t.god,
+    slamCd: 5,
     score: t.score,
     atkCd: rnd(0, 1), animT: rnd(0, 9), facing: 1, hitFlash: 0, warmup: 0.8,
     summonCd: 6, strafe: rnd(0, Math.PI * 2), chargeCd: 4, chargeT: 0,
@@ -1277,6 +1284,24 @@ function updatePlay(dt) {
         for (let i = 0; i < 3; i++) spawnEnemy("goblin", { x: e.x + rnd(-34, 34), y: e.y + rnd(-26, 26) });
       }
     }
+    if (e.god) { // grommok: ground slams + savages, enrages when wounded
+      const enragedGod = e.hp < e.maxHp * 0.4;
+      if (enragedGod) sp *= 1.6;
+      e.slamCd -= dt;
+      if (e.slamCd <= 0 && dToP < 200) {
+        e.slamCd = enragedGod ? 3.2 : 5;
+        texts.push({ x: e.x, y: e.y - 52, s: "!", life: 0.7, col: "#ff6b6b", big: true });
+        G.shake = Math.max(G.shake, 9);
+        SFX.boom();
+        bossRings.push({ x: e.x, y: e.y, r: 12, maxR: 100, dmg: e.dmg * 0.9 });
+      }
+      e.summonCd -= dt;
+      if (e.summonCd <= 0) {
+        e.summonCd = 8;
+        texts.push({ x: e.x, y: e.y - 40, s: "KNEEL!", life: 1.2, col: "#ffb347", big: true });
+        for (let i = 0; i < 2; i++) spawnEnemy("orc_savage", { x: e.x + rnd(-36, 36), y: e.y + rnd(-28, 28) });
+      }
+    }
     if (e.souls) { // the soulcaller raises ghost orcs around himself
       e.summonCd -= dt;
       if (e.summonCd <= 0) {
@@ -1360,6 +1385,11 @@ function updatePlay(dt) {
       bolts.splice(bolts.indexOf(b), 1);
       hurtPlayer(b.dmg);
     }
+  }
+  for (const ring of [...bossRings]) {
+    ring.r += 85 * dt;
+    if (ring.r >= ring.maxR) { bossRings.splice(bossRings.indexOf(ring), 1); continue; }
+    if (Math.abs(dist(ring, player) - ring.r) < 9) hurtPlayer(ring.dmg);
   }
 
   // -- pickups
@@ -1601,6 +1631,16 @@ function renderWorld() {
     ctx.restore();
   }
   for (const b of bolts) drawSprite(animFrame(ANIM.bolt, b.t, 8), b.x, b.y + 3);
+  for (const ring of bossRings) {
+    const fade = 1 - ring.r / ring.maxR;
+    ctx.save();
+    ctx.translate(ring.x, ring.y); ctx.scale(1, 0.7);
+    ctx.strokeStyle = `rgba(255,110,50,${0.3 + 0.6 * fade})`; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, ring.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,220,120,${0.5 + 0.5 * fade})`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, Math.max(1, ring.r - 3), 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
   for (const p of fx) {
     if (p.kind === "blood") {
       ctx.fillStyle = `rgba(110,180,60,${p.life / p.max})`;
@@ -1770,6 +1810,7 @@ function renderDarkness(cx, cy) {
   for (const f of fireballs) punch(f.x, f.y, 30, 0.8);
   for (const m of missiles) punch(m.x, m.y, 14, 0.6);
   for (const d of daggers) punch(d.x, d.y, 16, 0.6);
+  for (const ring of bossRings) punch(ring.x, ring.y, ring.r + 14, 0.5);
   for (const m of mushrooms) punch(m.x, m.y - 3, 22, 0.55);
   for (const t of torches) punch(t.x, t.y - 6, 46 + Math.sin(G.t * 9 + t.t) * 4, 0.8);
   if (kingPos) punch(kingPos.x, kingPos.y - 12, 36, 0.5);
