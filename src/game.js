@@ -40,6 +40,8 @@ const ANIM = {
   reaper_run: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
   assassin_idle: ["assassin_idle_f0", "assassin_idle_f1", "assassin_idle_f2", "assassin_idle_f3"],
   assassin_run: ["assassin_run_f0", "assassin_run_f1", "assassin_run_f2", "assassin_run_f3"],
+  slave_idle: ["slave_idle_f0", "slave_idle_f1", "slave_idle_f2", "slave_idle_f3"],
+  slave_run: ["slave_run_f0", "slave_run_f1", "slave_run_f2", "slave_run_f3"],
   monk_idle: ["monk_idle_f0", "monk_idle_f1", "monk_idle_f2", "monk_idle_f3"],
   monk_run: ["monk_run_f0", "monk_run_f1", "monk_run_f2", "monk_run_f3"],
   mage_idle: ["wizzard_m_idle_f0", "wizzard_m_idle_f1", "wizzard_m_idle_f2", "wizzard_m_idle_f3"],
@@ -440,6 +442,7 @@ const WEAPONS = {
   katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
   shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 5, atkSpd: 2.8, range: 125, arc: 0, star: true },
   spells: { name: "Arcane Arts", desc: "magic missile + fireball · shockwave · firebeam", sprite: "weapon_red_magic_staff", dmg: 10, atkSpd: 1, range: 165, arc: 0, spells: true },
+  combat: { name: "Bare Hands", desc: "fists, kicks & headbutts", sprite: "slave_idle_f0", dmg: 9, atkSpd: 2.4, range: 22, arc: 1.6, brawl: true },
   blastdagger: { name: "Blast Dagger", desc: "thrown blade, arcane burst on impact", sprite: "weapon_blast_dagger", dmg: 10, atkSpd: 1.3, range: 140, arc: 0, blast: true },
 };
 
@@ -469,6 +472,9 @@ const CLASSES = {
   mage: { name: "Mage", anim: "mage", desc: "auto missile + 3 click-cast spells", unlock: "mage", price: 900,
     weapons: ["spells", "blastdagger"],
     mods: s => { s.maxHp = 55; } },
+  slave: { name: "Slave", anim: "slave", desc: "unchained: fast fists, kicks & headbutts", unlock: "slave", secret: true,
+    weapons: ["combat"],
+    mods: s => { s.moveSpd *= 1.22; s.maxHp = 55; } },
   monk: { name: "Monk", anim: "monk", desc: "dev tester — masters every weapon", devOnly: true,
     weapons: Object.keys(WEAPONS),
     mods: s => { s.maxHp = 65; } },
@@ -495,7 +501,17 @@ function bankCoins() {
 }
 
 // unlocks persist across runs (best-effort; storage may be unavailable)
-const UN = { barbar: false, nun: false, reaper: false, scythe: false, assassin: false, mage: false };
+const UN = { barbar: false, nun: false, reaper: false, scythe: false, assassin: false, mage: false, slave: false };
+
+// secret classes never show in the menu until earned; devOnly need dev mode
+function visibleClasses() {
+  return Object.keys(CLASSES).filter(id => {
+    const c = CLASSES[id];
+    if (c.devOnly && !DEV.on) return false;
+    if (c.secret && !isUnlocked(c.unlock)) return false;
+    return true;
+  });
+}
 try { Object.assign(UN, JSON.parse(localStorage.getItem("orcslasher_unlocks") || "{}")); } catch (e) { /* no storage */ }
 function saveUnlocks() { try { localStorage.setItem("orcslasher_unlocks", JSON.stringify(UN)); } catch (e) { /* no storage */ } }
 function isUnlocked(key) { return DEV.on || !key || UN[key]; }
@@ -927,12 +943,23 @@ function playerMeleeAttack() {
   const ang = Math.atan2(target.y - player.y, target.x - player.x);
   player.facing = Math.cos(ang) >= 0 ? 1 : -1;
   player.atkAng = ang;
-  if (G.weapon === "whip") {
+  const wdef = WEAPONS[G.weapon];
+  let brawlHeadbutt = false;
+  if (wdef.brawl) { // bare hands cycle punch -> kick -> HEADBUTT
+    player.brawlN = ((player.brawlN || 0) + 1) % 3;
+    brawlHeadbutt = player.brawlN === 0;
+    // lunge into the blow
+    const lunge = brawlHeadbutt ? 6 : 3;
+    player.x += Math.cos(ang) * lunge; player.y += Math.sin(ang) * lunge;
+    fx.push({ kind: "slash", x: player.x + Math.cos(ang) * 10, y: player.y + Math.sin(ang) * 10 - 6, ang, life: 0.14, max: 0.14, scale: 0.7 });
+    if (brawlHeadbutt) beep(140, 0.1, "square", 0.09, -70);
+  } else if (G.weapon === "whip") {
     fx.push({ kind: "whip", ang, life: 0.18, max: 0.18 });
   } else if (G.weapon !== "spear") { // spear's thrust is the held weapon itself
     fx.push({ kind: "slash", x: player.x + Math.cos(ang) * 14, y: player.y + Math.sin(ang) * 14 - 6, ang, life: 0.18, max: 0.18, scale: G.weapon === "scythe" ? 1.7 : 1 });
   }
   SFX.slash();
+  let bonked = false;
   for (const e of [...enemies]) {
     if (e.warmup > 0) continue;
     const d = dist(player, e);
@@ -942,9 +969,15 @@ function playerMeleeAttack() {
     if (diff > Math.PI) diff = Math.PI * 2 - diff;
     if (diff < st.arc) {
       const crit = Math.random() < st.crit;
-      damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
-      // knockback
-      e.x += Math.cos(ea) * 6 * st.knock; e.y += Math.sin(ea) * 6 * st.knock;
+      const mult = brawlHeadbutt ? 1.5 : 1;
+      damageEnemy(e, st.dmg * mult * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+      // knockback (a headbutt sends them flying)
+      const kb = 6 * st.knock * (brawlHeadbutt ? 2.2 : 1);
+      e.x += Math.cos(ea) * kb; e.y += Math.sin(ea) * kb;
+      if (brawlHeadbutt && !bonked && enemies.includes(e)) {
+        bonked = true;
+        texts.push({ x: e.x, y: e.y - 16, s: "BONK!", life: 0.5, col: "#ffd166" });
+      }
     }
   }
 }
@@ -1466,6 +1499,13 @@ function updatePlay(dt) {
 
   // -- wave end
   if (!spawnQueue.length && enemies.length === 0) {
+    if (G.wave === 20 && !UN.slave) { // beating the Orc God frees his prisoner
+      UN.slave = true; saveUnlocks();
+      texts.push({ x: player.x, y: player.y - 52, s: "A CAGE BREAKS IN THE DEEP…", life: 3.5, col: "#b48cff", big: true });
+      texts.push({ x: player.x, y: player.y - 40, s: "SECRET HERO UNLOCKED: THE SLAVE", life: 3.5, col: "#ffd166", big: true });
+      SFX.level();
+      say("The King's servant… alive! Go — you are free.", 1.5);
+    }
     if (G.wave === FINAL_WAVE && !G.endless) {
       // victory is triggered on boss kill; safety net:
       G.state = "victory";
@@ -1739,7 +1779,7 @@ function drawPlayer() {
     ctx.rotate(player.atkAng + Math.PI / 2 + 0.4);
     ctx.drawImage(im, -im.width / 2, -im.height + 3);
     ctx.restore();
-  } else {
+  } else if (!wdef.brawl) { // bare hands hold nothing
     const throwerPose = wdef.ranged || wdef.thrown || wdef.star || wdef.spells || wdef.blast;
     const swing = (throwerPose || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
     ctx.save();
@@ -2402,7 +2442,7 @@ function renderClassSelect(t) {
   ctx.textAlign = "center";
 
   clsRects = [];
-  const ids = Object.keys(CLASSES).filter(id => !CLASSES[id].devOnly || DEV.on);
+  const ids = visibleClasses();
   const gap = 3;
   const cw = Math.min(76, Math.floor((VW - 16 - (ids.length - 1) * gap) / ids.length));
   const chh = 142;
@@ -2662,7 +2702,7 @@ function handleKey(code) {
   else if (G.state === "title" && (code === "Enter" || code === "Space")) { audio(); G.state = "cls"; }
   else if (G.state === "credits") { G.state = "title"; }
   else if (G.state === "cls") {
-    const ids = Object.keys(CLASSES).filter(id => !CLASSES[id].devOnly || DEV.on);
+    const ids = visibleClasses();
     if (code === "KeyF") { toggleFullscreen(); return; }
     const m = /^Digit([1-9])$/.exec(code);
     if (m) {

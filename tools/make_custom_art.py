@@ -895,6 +895,71 @@ monk("monk_run_f1", MON_LEGS_STAND, 0)
 monk("monk_run_f2", MON_LEGS_B, 1)
 monk("monk_run_f3", MON_LEGS_STAND, 0)
 
+# ------------------------------------------------------------- slave -------
+# secret hero: the King's stolen servant — ragged, barefoot, a broken
+# shackle still on one wrist, nothing but fists and fury.
+SLV_PAL = {
+    "K": (24, 18, 26, 255),    # outline
+    "F": (212, 172, 142, 255), # skin
+    "f": (178, 138, 110, 255), # skin shade
+    "H": (66, 50, 38, 255),    # messy hair
+    "B": (98, 72, 52, 255),    # ragged pants
+    "b": (70, 50, 38, 255),    # pants shade
+    "S": (134, 134, 146, 255), # broken shackle
+    "s": (94, 94, 106, 255),   # chain link
+}
+
+SLV_TOP = """
+......KKKK......
+.....KHHHHK.....
+....KHHHHHHK....
+....KHFFFFHK....
+....KFKFFKFK....
+....KFFFFFFK....
+.....KFffFK.....
+.....KSSSSK.....
+....KFFFFFFK....
+..KFFKFFFFKFFK..
+..KFfKFffFKFfK..
+..KSSKFFFFKFFK..
+..KsK.KFfFK.KFK.
+......KBBBBK....
+.....KBBbBBK....
+.....KBbKBbK....
+""".strip("\n")
+
+SLV_LEGS_STAND = """
+......KFFKFFK...
+......KfK.KfK...
+.......K...K....
+""".strip("\n")
+
+SLV_LEGS_A = """
+.....KFFK.KFFK..
+....KfK....KfK..
+.....K......K...
+""".strip("\n")
+
+SLV_LEGS_B = """
+....KFFK.KFFK...
+...KfK....KfK...
+....K......K....
+""".strip("\n")
+
+
+def slave(name, legs, bob):
+    save_grid(name, ("." * 16 + "\n") * bob + SLV_TOP + "\n" + legs, SLV_PAL)
+
+
+slave("slave_idle_f0", SLV_LEGS_STAND, 1)
+slave("slave_idle_f1", SLV_LEGS_STAND, 0)
+slave("slave_idle_f2", SLV_LEGS_STAND, 0)
+slave("slave_idle_f3", SLV_LEGS_STAND, 1)
+slave("slave_run_f0", SLV_LEGS_A, 1)
+slave("slave_run_f1", SLV_LEGS_STAND, 0)
+slave("slave_run_f2", SLV_LEGS_B, 1)
+slave("slave_run_f3", SLV_LEGS_STAND, 0)
+
 # ---------------------------------------------------------- assassin -------
 # hooded killer: slate hood and mask, only the eyes show, red sash.
 ASN_PAL = {
