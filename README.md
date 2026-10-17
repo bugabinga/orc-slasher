@@ -77,9 +77,19 @@ On the weapon screen, banked gold buys **permanent gun upgrades**
 
 Kill Patient Zero and endless mode opens. How deep can you go?
 
+## Look & feel
+
+With **FX** on (top-right of the menu), the city is lit for real: sodium
+streetlights, burning wrecks and barrels, muzzle flashes and explosions
+cast coloured light, your flashlight follows your aim, fog drifts through
+the streets, and most nights it rains, with the odd lightning strike.
+Over it all sits a retro CRT: soft curvature, scanlines, bloom, a little
+chromatic aberration, and shockwaves when rockets land. It needs WebGL2
+on a real GPU; otherwise the game quietly uses its plain 2D look.
+
 ## Settings
 
-Top-right of the menu: mute the music ♪ and sound effects 🔊 separately.
+Top-right of the menu: toggle FX, mute the music ♪ and sound effects 🔊 separately.
 Your choices are remembered. Press **C** on the title for the credits.
 
 ## Credits

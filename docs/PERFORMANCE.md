@@ -103,6 +103,24 @@ From MDN "WebGL best practices":
 - Cap the output backing store (we cap at ~2.3 MP) — a 4K screen at DPR 2
   is 33 MP of fragment work.
 
+## 7. Lessons measured in this repo
+
+- Headless Chromium rasterises canvas and runs WebGL on the CPU
+  (SwiftShader). There, `drawImage` dominates profiles and any WebGL
+  presentation caps us near 20 fps. Real GPUs don't behave like that, so
+  the game detects software GL (`softwareGL()`) and stays on 2D; measure
+  the GL path with `--gl force` and treat its fps as a worst case.
+- Copying offscreen layers onto the visible canvas costs real time on a
+  CPU rasteriser (menu 3 ms → 13 ms at 4× throttle). The 2D path draws
+  straight onto the visible canvas; only the WebGL path uses layers.
+- A zero-filled `Int32Array` used as linked-list heads is a cycle waiting
+  to happen: initialise "empty" sentinels (`-1`) explicitly.
+- `putImageData`/path-drawing spikes that disappear when stubbed were the
+  synchronous-loop artifact from §1, not slow code. Check with the rAF
+  bench before "fixing" them.
+- Light falloff matters more than light count: `(1-d/r)²` left lamps
+  nearly invisible; a smoothstep falloff gives readable pools.
+
 ## Sources
 
 - web.dev — [Performance tips for JavaScript in V8](https://web.dev/articles/speed-v8)

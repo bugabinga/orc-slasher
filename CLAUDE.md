@@ -7,7 +7,8 @@ Player-facing docs live in README.md; this file is the technical map.
 `docs/PERFORMANCE.md` holds the rules for the hot loop (no per-frame
 allocation, in-place array compaction, spatial hash, cached sprites, how
 to drive WebGL). Measure every perf change with `node tools/bench.mjs`
-(real rAF loop, not a synchronous sim) and put before/after numbers in the
+(real rAF loop, not a synchronous sim; `--throttle 4`, `--fx off`,
+`--gl force`) and put before/after numbers in the
 commit message.
 
 ## Repo layout
@@ -98,10 +99,20 @@ src/game.js` before building.
   and points at the King. Bump `mapStamp` once per frame (LRU clock)
 - **States**: title → credits (optional) → cls → select → play ⇄ campfire
   → gameover/victory. All input goes through `handleKey` / `handleClick`
-- **Rendering**: 480×270 internal canvas, pixel-perfect (`image-rendering:
-  pixelated`), feet-anchored `drawSprite`, y-sorted entities, offscreen
-  chunked floor canvases, radar, darkness overlay with radial "punch" lights, screenshake,
-  damage-number texts
+- **Rendering**: the game draws 480×270 into two layers — `sceneCtx`
+  (world) and `uiCtx` (HUD, damage numbers, overlays; never lit). `ctx`
+  points at the current one; `frame()` switches it. Feet-anchored
+  `drawSprite` (cached flipped / tinted copies, no `ctx.filter`), y-sorted
+  draw list, chunked floor, radar, text-bitmap cache. Lights are collected
+  once per frame into `LIGHTS` (`addLight`/`collectLights`).
+- **FX** (`initFX` / `present`): WebGL2 passes — light (coloured lights,
+  flashlight cone, fog, pixel rain, lightning) → bloom (½ res) → final
+  (CRT curve, sharp scaling, chromatic aberration, `fxShock` shockwaves,
+  grading, scanlines, vignette, grain, hurt/low-HP). `fxWarp` maps clicks
+  through the curve. Toggle: `SND.fx` (menu FX button). Without WebGL2, or
+  on a software rasteriser (SwiftShader/llvmpipe; `?gl=force` overrides),
+  both layers are the visible 2D canvas and `renderDarkness` draws the
+  night instead. `fxPerf` halves the output resolution if frames stay slow
 
 ## Conventions
 

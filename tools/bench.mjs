@@ -3,17 +3,23 @@
 // Measures the game's own frame() inside the real requestAnimationFrame loop
 // (a synchronous update/render loop never presents and gives bogus spikes).
 //
-//   node tools/bench.mjs [--file path.html] [--throttle 4] [--scene horde]
+//   node tools/bench.mjs [--file path.html] [--throttle 4] [--scene horde] [--fx off] [--gl force]
 //
 // --throttle N slows the CPU N× (CDP), roughly a mid/low-end phone at 4–6.
+// --fx off measures the plain 2D path. Note: headless Chromium runs WebGL on
+// SwiftShader (CPU); the game detects that and uses its 2D path, so pass
+// --gl force to measure the WebGL path anyway (far slower here than on a GPU).
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 import path from "node:path";
 
-const args = Object.fromEntries(process.argv.slice(2).join(" ").split("--").filter(Boolean).map(a => a.trim().split(/\s+/)));
-const file = path.resolve(args.file?.[0] || "dist/orc-slasher.html");
-const throttle = +(args.throttle?.[0] || 1);
-const only = args.scene?.[0];
+const args = {};
+for (let i = 2; i < process.argv.length; i++) if (process.argv[i].startsWith("--")) args[process.argv[i].slice(2)] = process.argv[i + 1];
+const file = path.resolve(args.file || "dist/orc-slasher.html");
+const throttle = +(args.throttle || 1);
+const only = args.scene;
+const fxOn = (args.fx || "on") !== "off";
+const query = args.gl === "force" ? "?gl=force" : "";
 const require = createRequire(import.meta.url);
 let playwright;
 try { playwright = require("playwright"); } catch { playwright = require(path.join(execSync("npm root -g").toString().trim(), "playwright")); }
@@ -46,8 +52,9 @@ for (const [name, sc] of Object.entries(SCENES)) {
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttle });
   }
-  await page.goto("file://" + file);
+  await page.goto("file://" + file + query);
   await page.waitForFunction(() => typeof assetsLeft !== "undefined" && assetsLeft === 0);
+  await page.evaluate(on => { SND.fx = on; }, fxOn);
   if (name !== "menu") await page.keyboard.press("Enter");
   await page.evaluate(`(${sc.setup})()`);
   await page.evaluate(() => {
@@ -68,10 +75,11 @@ for (const [name, sc] of Object.entries(SCENES)) {
   if (keys.length) for (const k of keys) { await page.keyboard.down(k); await page.waitForTimeout(per); await page.keyboard.up(k); }
   else await page.waitForTimeout(sc.secs * 1000);
   const ft = await page.evaluate(() => window.__ft.slice());
+  const fps = ft.length / sc.secs;
   ft.sort((a, b) => a - b);
   const q = p => ft[Math.min(ft.length - 1, Math.floor(ft.length * p))];
   results.push({
-    scene: name, frames: ft.length,
+    scene: name, fps: fps.toFixed(0),
     p50: q(0.5).toFixed(2), p99: q(0.99).toFixed(2), max: ft[ft.length - 1].toFixed(1),
     over16: ft.filter(t => t > 16.7).length, errors: errors.length,
   });
@@ -79,5 +87,5 @@ for (const [name, sc] of Object.entries(SCENES)) {
   await page.close();
 }
 await browser.close();
-console.log(`bench ${path.basename(file)} · cpu throttle ${throttle}×  (ms of game work per frame)`);
+console.log(`bench ${path.basename(file)} · cpu throttle ${throttle}× · fx ${fxOn ? "on" : "off"}${query ? " · gl forced" : ""}  (fps = presented frames/s; p50/p99/max = ms of game JS per frame)`);
 console.table(results);

@@ -5,10 +5,14 @@
 "use strict";
 
 // ------------------------------------------------------------------ setup --
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-ctx.imageSmoothingEnabled = false;
+const canvas = document.getElementById("game"); // what the player sees (WebGL2, or 2D fallback)
 const VW = canvas.width, VH = canvas.height;
+// the game draws into two offscreen layers: the world scene (lit by the FX
+// pass) and the UI on top (never lit). `ctx` points at whichever is current.
+const sceneCanvas = document.createElement("canvas"), uiCanvas = document.createElement("canvas");
+sceneCanvas.width = uiCanvas.width = VW; sceneCanvas.height = uiCanvas.height = VH;
+let sceneCtx = sceneCanvas.getContext("2d", { alpha: false }), uiCtx = uiCanvas.getContext("2d");
+let ctx = sceneCtx;
 
 const TILE = 16;
 const MAP_W = 4096, MAP_H = 4096; // virtual: any size works, cost follows the view
@@ -83,7 +87,7 @@ for (const p of ["cp_orc1", "cp_orc2", "cp_orc3", "cp_frost", "cp_night", "cp_bl
 }
 
 // sound settings ------------------------------------------------------------
-const SND = { music: true, sfx: true };
+const SND = { music: true, sfx: true, fx: true }; // fx = WebGL lighting + CRT post-processing
 try { Object.assign(SND, JSON.parse(localStorage.getItem("orcslasher_sound") || "{}")); } catch (e) { /* no storage */ }
 function saveSound() { try { localStorage.setItem("orcslasher_sound", JSON.stringify(SND)); } catch (e) { /* no storage */ } }
 
@@ -248,7 +252,9 @@ function canvasPos(t) {
   // object-fit: contain math
   const scale = Math.min(r.width / VW, r.height / VH);
   const offX = (r.width - VW * scale) / 2, offY = (r.height - VH * scale) / 2;
-  return { x: (t.clientX - r.left - offX) / scale, y: (t.clientY - r.top - offY) / scale };
+  // undo the CRT curvature so taps land where the button is drawn
+  const [u, v] = fxWarp((t.clientX - r.left - offX) / scale / VW, 1 - (t.clientY - r.top - offY) / scale / VH);
+  return { x: u * VW, y: (1 - v) * VH };
 }
 canvas.addEventListener("pointerdown", e => {
   if (e.pointerType === "touch") usingTouch = true;
@@ -1036,6 +1042,8 @@ function newRun(weaponId) {
   };
   player.ammo = clipSize();
   flowT = 0;
+  fxState.rain = Math.random() < 0.65 ? 1 : 0; // most nights it rains
+  fxState.nextBolt = rnd(12, 30); shocks.length = 0;
   enemies = []; gems = []; coins = []; flasks = []; bolts = []; bullets = []; grenades = []; firePatches = []; bossRings = []; fx = []; texts = [];
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
@@ -1476,6 +1484,8 @@ function explode(x, y, r, dmg, crit) {
   }
   fx.push({ kind: "ring", x, y, life: 0.3, max: 0.3, r });
   fx.push({ kind: "flash", x, y, life: 0.18, max: 0.18, r });
+  fxShock(x, y, 3.5);
+  fxState.chroma = Math.min(1, fxState.chroma + 0.5);
   for (let i = 0; i < 14; i++) {
     fx.push({ kind: "spark", x, y: y - 2, vx: rnd(-80, 80), vy: rnd(-100, -10), life: rnd(0.25, 0.6), max: 0.6 });
   }
@@ -1671,6 +1681,7 @@ function updatePlay(dt) {
         G.shake = Math.max(G.shake, 9);
         SFX.boom();
         bossRings.push({ x: e.x, y: e.y, r: 12, maxR: 100, dmg: e.dmg * 0.9 });
+        fxShock(e.x, e.y, 5);
       }
       e.summonCd -= dt;
       if (e.summonCd <= 0) {
@@ -1888,6 +1899,7 @@ function hurtPlayer(dmg) {
   }
   player.hurtCd = 0.5;
   player.flash = 0.15;
+  fxState.hurt = 1;
   G.shake = 6;
   SFX.hurt();
   texts.push({ x: player.x, y: player.y - 26, s: "-" + big(taken), life: 0.8, col: "#ff6b6b" });
@@ -2166,7 +2178,7 @@ function collectLights(cx, cy) {
     for (const p of c.props) if (p.fire) addLight(p.x, p.y - p.fireY, 50 + Math.sin(G.t * 9 + p.t) * 5, 0.9, 1.0, 0.52, 0.2);
     for (const l of c.lamps) {
       if (l.flicker && Math.sin(G.t * 23 + l.t) + Math.sin(G.t * 7.3 + l.t * 2) > 1.1) continue; // dying bulb
-      addLight(l.x, l.y, 64, 0.8, 1.0, 0.74, 0.42);
+      addLight(l.x, l.y, gl ? 78 : 64, 0.8, 1.0, 0.74, 0.42);
     }
   }
   for (const b of bolts) addLight(b.x, b.y, 24, 0.8, 0.45, 1.0, 0.3);
@@ -2632,6 +2644,13 @@ function slashOut(r) {
 }
 function drawKeyButton() {
   sndBtnRects = [];
+  // FX toggle (lighting + CRT)
+  let rf = menuButton(VW - 140, SND.fx);
+  ctx.font = "bold 7px monospace"; ctx.textAlign = "center";
+  ctx.fillStyle = SND.fx ? "#e8dfc8" : "#57506b";
+  ctx.fillText("FX", rf.x + rf.w / 2, rf.y + 13);
+  if (!SND.fx) slashOut(rf);
+  sndBtnRects.push({ ...rf, id: "fx" });
   // fullscreen toggle
   let r = menuButton(VW - 112, true);
   ctx.strokeStyle = "#e8dfc8"; ctx.lineWidth = 1;
@@ -3050,6 +3069,362 @@ function renderEnd(victory, t) {
   }
 }
 
+// ------------------------------------------------------------- FX / WebGL --
+// Retro-but-modern post-processing (docs/PERFORMANCE.md §6). The game draws
+// into two 480x270 layers — the scene and the UI — which are uploaded once a
+// frame and composited by four passes:
+//   light  (480x270)  coloured lights + flashlight cone, fog, rain, lightning
+//   bright (240x135)  bright-pass for bloom, then a separable blur (2 passes)
+//   final  (screen)   CRT curvature, sharp pixel scaling, chromatic
+//                     aberration, shockwaves, grading, scanlines, vignette,
+//                     grain, hurt / low-HP pulse, UI on top
+// Without WebGL2 the layers are copied onto a 2D canvas instead.
+const FX_CURVE = [0.045, 0.06]; // barrel strength per axis; canvasPos() uses the same warp
+const MAX_SHOCKS = 6;
+const shocks = []; // { x, y, t } world space, t = age in seconds
+let FXR = null;
+
+const GLSL_HEAD = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+`;
+const VS = `#version 300 es
+out vec2 vUv;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); // one big triangle
+  vUv = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+const FS_LIGHT = GLSL_HEAD + `
+uniform sampler2D uScene;
+uniform vec4 uL[${MAX_LIGHTS}];   // x, y, radius, intensity (game px, top-left origin)
+uniform vec3 uC[${MAX_LIGHTS}];   // colour
+uniform int uNL;
+uniform vec3 uAmb;
+uniform vec4 uTorch;   // hand x, y, aim angle, intensity
+uniform vec2 uCam;     // camera offset: fog sticks to the world
+uniform float uTime, uLit, uRain, uFlash;
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+void main() {
+  vec3 base = texture(uScene, vUv).rgb;
+  if (uLit < 0.5) { o = vec4(base, 1.0); return; }
+  vec2 px = vec2(vUv.x, 1.0 - vUv.y) * vec2(480.0, 270.0);
+  vec3 light = uAmb + vec3(0.85, 0.9, 1.0) * uFlash;
+  for (int i = 0; i < ${MAX_LIGHTS}; i++) {
+    if (i >= uNL) break;
+    vec4 L = uL[i];
+    vec2 d = px - L.xy;
+    float r2 = dot(d, d);
+    if (r2 >= L.z * L.z) continue;
+    float a = 1.0 - sqrt(r2) / L.z;
+    light += uC[i] * (a * a * (3.0 - 2.0 * a)) * L.w * 1.3; // smoothstep falloff: wide soft pools
+  }
+  if (uTorch.w > 0.0) {
+    vec2 d = px - uTorch.xy;
+    float len = max(length(d), 0.001);
+    float c = dot(d / len, vec2(cos(uTorch.z), sin(uTorch.z)));
+    float cone = smoothstep(0.86, 0.96, c) * (1.0 - smoothstep(30.0, 175.0, len)) + (1.0 - smoothstep(0.0, 18.0, len)) * 0.25;
+    light += vec3(0.8, 0.9, 1.0) * cone * uTorch.w;
+  }
+  vec3 lit = base * light;
+  // drifting ground fog, brighter where it catches the light
+  float f = fbm((px + uCam) * 0.011 + vec2(uTime * 0.045, uTime * 0.018));
+  lit += vec3(0.30, 0.34, 0.46) * f * f * 0.3 * (0.35 + 0.65 * min(light, vec3(1.3)));
+  // pixel rain: slanted 1px streaks per 3px column, lit by nearby lamps
+  if (uRain > 0.0) {
+    float col = floor((px.x + px.y * 0.35) / 3.0);
+    float h = hash(vec2(col, 7.0));
+    float seg = mod(px.y + uTime * (230.0 + h * 120.0) + h * 400.0, 70.0 + h * 90.0);
+    float drop = step(seg, 3.0) * step(0.8, hash(vec2(col, 3.0)));
+    lit += vec3(0.55, 0.62, 0.78) * drop * uRain * (0.1 + 0.35 * min(light.b, 1.0));
+  }
+  o = vec4(lit, 1.0);
+}`;
+const FS_BRIGHT = GLSL_HEAD + `
+uniform sampler2D uSrc;
+void main() {
+  vec3 c = texture(uSrc, vUv).rgb;
+  float l = max(c.r, max(c.g, c.b));
+  o = vec4(c * smoothstep(0.5, 0.95, l), 1.0);
+}`;
+const FS_BLUR = GLSL_HEAD + `
+uniform sampler2D uSrc;
+uniform vec2 uDir; // one texel step along the blur axis
+void main() {
+  vec3 c = texture(uSrc, vUv).rgb * 0.227;
+  c += (texture(uSrc, vUv + uDir * 1.38).rgb + texture(uSrc, vUv - uDir * 1.38).rgb) * 0.316;
+  c += (texture(uSrc, vUv + uDir * 3.23).rgb + texture(uSrc, vUv - uDir * 3.23).rgb) * 0.070;
+  o = vec4(c, 1.0);
+}`;
+const FS_FINAL = GLSL_HEAD + `
+uniform sampler2D uLitT, uBloom, uUI;
+uniform vec2 uOut;
+uniform float uTime, uFx, uHurt, uLow, uChroma;
+uniform vec4 uShock[${MAX_SHOCKS}]; // x, y (game px), radius, strength
+uniform int uNS;
+const vec2 RES = vec2(480.0, 270.0);
+vec2 warp(vec2 uv) {
+  vec2 c = uv * 2.0 - 1.0;
+  c *= 1.0 + c.yx * c.yx * vec2(${FX_CURVE[0]}, ${FX_CURVE[1]}) * uFx;
+  return c * 0.5 + 0.5;
+}
+// sharp bilinear: crisp pixels at any scale, only the texel edges blend
+vec2 sharp(vec2 uv) {
+  vec2 t = uv * RES, s = max(uOut / RES, vec2(1.0));
+  vec2 fl = floor(t), fr = fract(t) - 0.5;
+  vec2 region = 0.5 - 0.5 / s;
+  return (fl + (fr - clamp(fr, -region, region)) * s + 0.5) / RES;
+}
+void main() {
+  vec2 w = warp(vUv);
+  if (w.x < 0.0 || w.y < 0.0 || w.x > 1.0 || w.y > 1.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  vec2 gp = vec2(w.x, 1.0 - w.y) * RES;
+  vec2 off = vec2(0.0);
+  for (int i = 0; i < ${MAX_SHOCKS}; i++) {
+    if (i >= uNS) break;
+    vec4 s = uShock[i];
+    vec2 d = gp - s.xy;
+    float dl = max(length(d), 1.0);
+    off += d / dl * (1.0 - smoothstep(0.0, 9.0, abs(dl - s.z))) * s.w;
+  }
+  vec2 wu = w + vec2(off.x, -off.y) / RES;
+  vec2 cc = (wu - 0.5) * (0.5 + uChroma * 2.5) * uFx / RES * 2.0;
+  vec3 col = vec3(texture(uLitT, sharp(wu + cc)).r, texture(uLitT, sharp(wu)).g, texture(uLitT, sharp(wu - cc)).b);
+  col += texture(uBloom, wu).rgb * 0.85 * uFx;
+  // grade: cold teal shadows, warm sodium highlights, a touch of contrast
+  float l = dot(col, vec3(0.299, 0.587, 0.114));
+  vec3 graded = mix(col * vec3(0.9, 1.0, 1.12), col * vec3(1.12, 1.0, 0.86), smoothstep(0.15, 0.75, l));
+  graded = (graded - 0.5) * 1.06 + 0.5;
+  col = mix(col, graded, uFx);
+  col = mix(col, vec3(l) * vec3(1.05, 0.95, 0.95), uLow * 0.65);
+  vec4 ui = texture(uUI, sharp(w));
+  col = mix(col, ui.rgb, ui.a);
+  vec2 v = w - 0.5;
+  float sk = smoothstep(1.5, 3.0, uOut.y / RES.y); // scanlines only once a game pixel is several screen pixels
+  col *= 1.0 - uFx * sk * 0.16 * (0.5 - 0.5 * cos(gp.y * 6.2831853));
+  col *= 1.0 - dot(v, v) * 0.85 * uFx;
+  col = mix(col, vec3(0.55, 0.02, 0.03), min(0.7, uHurt * 0.5 + uLow * 0.3) * smoothstep(0.25, 0.7, length(v * vec2(1.0, 0.8))));
+  col += (hash(gl_FragCoord.xy + fract(uTime * 7.0) * 113.0) - 0.5) * 0.05 * uFx;
+  o = vec4(col, 1.0);
+}`;
+
+// a software rasteriser (SwiftShader, llvmpipe — e.g. a blocklisted GPU)
+// would run the passes on the CPU and be slower than plain 2D
+function softwareGL() {
+  try {
+    const g = document.createElement("canvas").getContext("webgl2");
+    if (!g) return true;
+    const ext = g.getExtension("WEBGL_debug_renderer_info");
+    const r = ext ? String(g.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : "";
+    const lose = g.getExtension("WEBGL_lose_context");
+    if (lose) lose.loseContext();
+    return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(r);
+  } catch (e) { return true; }
+}
+
+function initFX() {
+  const useGL = /[?&]gl=force/.test(location.search) || !softwareGL();
+  const gl = useGL && canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, powerPreference: "high-performance" });
+  if (!gl) { // plain 2D: both layers draw straight onto the visible canvas
+    const c2 = canvas.getContext("2d", { alpha: false });
+    if (c2) { sceneCtx = uiCtx = c2; ctx = c2; }
+    return;
+  }
+  const compile = (type, src) => {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+    return sh;
+  };
+  const vs = compile(gl.VERTEX_SHADER, VS);
+  const program = (fs, names) => {
+    const p = gl.createProgram();
+    gl.attachShader(p, vs); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {};
+    for (const n of names) u[n] = gl.getUniformLocation(p, n);
+    return { p, u };
+  };
+  const tex = (w, h, filter) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  };
+  const target = (w, h) => {
+    const t = tex(w, h, gl.LINEAR), fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    return { t, fb, w, h };
+  };
+  try {
+    const R = {
+      gl,
+      light: program(FS_LIGHT, ["uScene", "uL", "uC", "uNL", "uAmb", "uTorch", "uCam", "uTime", "uLit", "uRain", "uFlash"]),
+      bright: program(FS_BRIGHT, ["uSrc"]),
+      blur: program(FS_BLUR, ["uSrc", "uDir"]),
+      final: program(FS_FINAL, ["uLitT", "uBloom", "uUI", "uOut", "uTime", "uFx", "uHurt", "uLow", "uChroma", "uShock", "uNS"]),
+      scene: tex(VW, VH, gl.NEAREST), ui: tex(VW, VH, gl.LINEAR),
+      lit: target(VW, VH), bloomA: target(VW / 2, VH / 2), bloomB: target(VW / 2, VH / 2),
+      vao: gl.createVertexArray(),
+      lightPos: new Float32Array(MAX_LIGHTS * 4), lightCol: new Float32Array(MAX_LIGHTS * 3),
+      shockBuf: new Float32Array(MAX_SHOCKS * 4),
+    };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    FXR = R;
+  } catch (e) {
+    console.warn("FX disabled:", e.message);
+  }
+  resizeFX();
+  window.addEventListener("resize", resizeFX);
+  canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); FXR = null; });
+  canvas.addEventListener("webglcontextrestored", () => { initFX(); });
+}
+
+// backing store follows the screen, capped by fxPerf.capMP megapixels of
+// fragment work; the CSS keeps object-fit: contain, so the aspect never changes
+const fxPerf = { ema: 16.7, slowT: 0, capMP: 2.4 };
+function resizeFX() {
+  if (!FXR) { canvas.width = VW; canvas.height = VH; return; }
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let s = Math.min(window.innerWidth / VW, window.innerHeight / VH) * dpr;
+  s = Math.max(1, Math.min(s, Math.sqrt(fxPerf.capMP * 1e6 / (VW * VH))));
+  canvas.width = Math.round(VW * s); canvas.height = Math.round(VH * s);
+}
+
+// the same barrel warp as the final shader, for mapping clicks
+function fxWarp(u, v) {
+  if (!FXR || !SND.fx) return [u, v];
+  const cx = u * 2 - 1, cy = v * 2 - 1;
+  return [(cx * (1 + cy * cy * FX_CURVE[0]) + 1) / 2, (cy * (1 + cx * cx * FX_CURVE[1]) + 1) / 2];
+}
+
+const fxState = { hurt: 0, chroma: 0, flash: 0, nextBolt: 20, rain: 0 };
+function fxShock(x, y, strength) {
+  if (shocks.length >= MAX_SHOCKS) shocks.shift();
+  shocks.push({ x, y, t: 0, s: strength });
+}
+// per-frame FX bookkeeping: decays, lightning, shockwave ages, and adaptive
+// resolution — if frames stay slow for 2s, halve the output megapixels
+function updateFX(dt) {
+  if (FXR && SND.fx) {
+    fxPerf.ema += (dt * 1000 - fxPerf.ema) * 0.05;
+    if (fxPerf.ema > 24 && fxPerf.capMP > 0.35) {
+      if ((fxPerf.slowT += dt) > 2) { fxPerf.slowT = 0; fxPerf.ema = 16.7; fxPerf.capMP /= 2; resizeFX(); }
+    } else fxPerf.slowT = 0;
+  }
+  fxState.hurt = Math.max(0, fxState.hurt - dt * 2.2);
+  fxState.chroma = Math.max(0, fxState.chroma - dt * 2.5);
+  fxState.flash = Math.max(0, fxState.flash - dt * 3.2);
+  let w = 0;
+  for (let i = 0; i < shocks.length; i++) { const s = shocks[i]; s.t += dt; if (s.t < 0.55) shocks[w++] = s; }
+  shocks.length = w;
+  if (fxState.rain > 0 && G.state === "play" && (fxState.nextBolt -= dt) <= 0) { // lightning: double flash, thunder after
+    fxState.nextBolt = rnd(18, 45);
+    fxState.flash = 1;
+    setTimeout(() => { fxState.flash = 0.7; }, 140);
+    setTimeout(() => { noise(1.8, 0.14, 160); beep(45, 1.2, "sawtooth", 0.05, -10); }, rnd(400, 1400));
+  }
+}
+
+function present(t, lit) {
+  if (!FXR) return; // 2D path already drew onto the visible canvas
+  const R = FXR, gl = R.gl, fx = SND.fx ? 1 : 0;
+  // DOM uploads first: they flush the pipeline (MDN WebGL best practices)
+  gl.bindTexture(gl.TEXTURE_2D, R.scene);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, sceneCanvas);
+  gl.bindTexture(gl.TEXTURE_2D, R.ui);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, uiCanvas);
+  gl.bindVertexArray(R.vao);
+  const camX = Math.round(lightCam.x), camY = Math.round(lightCam.y);
+  const doLight = lit && fx;
+
+  // 1. light
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.lit.fb);
+  gl.viewport(0, 0, VW, VH);
+  gl.useProgram(R.light.p);
+  const L = R.light.u;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.scene); gl.uniform1i(L.uScene, 0);
+  gl.uniform1f(L.uLit, doLight ? 1 : 0);
+  if (doLight) {
+    for (let i = 0; i < lightCount; i++) {
+      const k = i * 7;
+      R.lightPos[i * 4] = LIGHTS[k] - camX; R.lightPos[i * 4 + 1] = LIGHTS[k + 1] - camY;
+      R.lightPos[i * 4 + 2] = LIGHTS[k + 2]; R.lightPos[i * 4 + 3] = LIGHTS[k + 3];
+      R.lightCol[i * 3] = LIGHTS[k + 4]; R.lightCol[i * 3 + 1] = LIGHTS[k + 5]; R.lightCol[i * 3 + 2] = LIGHTS[k + 6];
+    }
+    gl.uniform4fv(L.uL, R.lightPos); gl.uniform3fv(L.uC, R.lightCol); gl.uniform1i(L.uNL, lightCount);
+    gl.uniform3f(L.uAmb, 0.2, 0.22, 0.34);
+    if (player && G.state === "play") {
+      const h = handPos();
+      const ang = aiming() ? player.atkAng : (player.facing > 0 ? 0.25 : Math.PI - 0.25);
+      gl.uniform4f(L.uTorch, h.x - camX, h.y - camY, ang, 0.85);
+    } else gl.uniform4f(L.uTorch, 0, 0, 0, 0);
+    gl.uniform2f(L.uCam, camX, camY);
+    gl.uniform1f(L.uTime, t); gl.uniform1f(L.uRain, fxState.rain); gl.uniform1f(L.uFlash, fxState.flash);
+  }
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  // 2. bloom: bright-pass at half resolution, blur across then down
+  if (fx) {
+    gl.viewport(0, 0, VW / 2, VH / 2);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, R.bloomA.fb);
+    gl.useProgram(R.bright.p);
+    gl.bindTexture(gl.TEXTURE_2D, R.lit.t); gl.uniform1i(R.bright.u.uSrc, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.useProgram(R.blur.p); gl.uniform1i(R.blur.u.uSrc, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, R.bloomB.fb);
+    gl.bindTexture(gl.TEXTURE_2D, R.bloomA.t); gl.uniform2f(R.blur.u.uDir, 2 / VW, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, R.bloomA.fb);
+    gl.bindTexture(gl.TEXTURE_2D, R.bloomB.t); gl.uniform2f(R.blur.u.uDir, 0, 2 / VH);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  // 3. final, to the screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(R.final.p);
+  const F = R.final.u;
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.lit.t); gl.uniform1i(F.uLitT, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, R.bloomA.t); gl.uniform1i(F.uBloom, 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, R.ui); gl.uniform1i(F.uUI, 2);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.uniform2f(F.uOut, canvas.width, canvas.height);
+  gl.uniform1f(F.uTime, t); gl.uniform1f(F.uFx, fx);
+  const low = lit && player ? clamp(1 - player.hp / (player.stats.maxHp * 0.3), 0, 1) * (0.6 + 0.4 * Math.abs(Math.sin(t * 3.2))) : 0;
+  gl.uniform1f(F.uHurt, lit ? fxState.hurt : 0); gl.uniform1f(F.uLow, low); gl.uniform1f(F.uChroma, fxState.chroma);
+  let ns = 0;
+  if (doLight) {
+    for (const s of shocks) {
+      const k = ns++ * 4, p = s.t / 0.55;
+      R.shockBuf[k] = s.x - camX; R.shockBuf[k + 1] = s.y - camY;
+      R.shockBuf[k + 2] = p * 120; R.shockBuf[k + 3] = s.s * (1 - p) * (1 - p);
+    }
+    gl.uniform4fv(F.uShock, R.shockBuf);
+  }
+  gl.uniform1i(F.uNS, ns);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+fxLit = () => !!FXR && SND.fx;
+
 // ------------------------------------------------------------- input glue --
 function handleKey(code) {
   if (code === "KeyF" && ["title", "select"].includes(G.state)) { toggleFullscreen(); return; }
@@ -3218,15 +3593,20 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   mapStamp++;
-  ctx.imageSmoothingEnabled = false;
+  ctx = sceneCtx;
+  sceneCtx.imageSmoothingEnabled = uiCtx.imageSmoothingEnabled = false;
+  if (uiCtx !== sceneCtx) uiCtx.clearRect(0, 0, VW, VH);
+  let lit = false; // the scene is the city at night (lights apply) vs a menu screen
 
   if (assetsLeft > 0) {
     ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
     ctx.fillStyle = "#cfc6de"; ctx.font = "10px monospace"; ctx.textAlign = "center";
     ctx.fillText("loading magazines…", VW / 2, VH / 2);
+    present(now / 1000, false);
     requestAnimationFrame(frame);
     return;
   }
+  updateFX(dt);
 
   if (G.state === "title") renderTitle(now / 1000);
   else if (G.state === "credits") renderCredits(now / 1000);
@@ -3236,6 +3616,7 @@ function frame(now) {
     if (!G.paused) updatePlay(dt);
     if (G.state === "play" || G.state === "gameover" || G.state === "victory") {
       renderWorld();
+      lit = true; ctx = uiCtx;
       renderWorldTexts();
       renderHUD();
       if (G.state === "play" && G.paused) renderPauseOverlay(now / 1000);
@@ -3243,8 +3624,9 @@ function frame(now) {
     } else if (G.state === "campfire") renderCampfire(dt);
   }
   else if (G.state === "campfire") renderCampfire(dt);
-  else if (G.state === "gameover" || G.state === "victory") { renderWorld(); renderWorldTexts(); renderHUD(); renderEnd(G.state === "victory", now / 1000); }
+  else if (G.state === "gameover" || G.state === "victory") { renderWorld(); lit = true; ctx = uiCtx; renderWorldTexts(); renderHUD(); renderEnd(G.state === "victory", now / 1000); }
 
+  ctx = uiCtx;
   // password modal over the menus
   if (passModal.open) {
     if (!["title", "cls", "select"].includes(G.state)) closePassModal();
@@ -3269,6 +3651,8 @@ function frame(now) {
     ctx.beginPath(); ctx.arc(touchState.ox + touchState.dx / d * cl, touchState.oy + touchState.dy / d * cl, 6, 0, Math.PI * 2); ctx.fill();
   }
 
+  present(now / 1000, lit);
   requestAnimationFrame(frame);
 }
+initFX();
 requestAnimationFrame(frame);
