@@ -41,6 +41,7 @@ python3 tools/extract_craftpix.py <pack-dir>  # slice CraftPix sheets (rarely ne
 python3 tools/recolor_variants.py    # frost/night/blood orc recolors
 python3 tools/make_gun_art.py        # gunner heroes, guns, rocket/grenade
 python3 tools/make_city_art.py       # city tiles + props (city_*)
+python3 tools/make_gore_art.py       # font_atlas, gibs, splats, rubble, debris
 python3 tools/zombify.py             # every orc/goblin/ogre frame -> assets/zombies/
 python3 tools/extract_kenney.py <sheet.png>  # grimed Kenney street props (rarely needed)
 python3 tools/build_sounds.py <zombies-dir> <residue-dir>  # CC0 sfx -> assets/sounds/
@@ -67,9 +68,39 @@ src/game.js` before building.
   `mods(stats)` function. Every weapon is a gun with `clip`/`reload`;
   `kind`: `bullet` (optional `pellets`, `pierce`, `akimbo`), `rocket`
   (explodes on hit), `grenade` (lobbed arc, `fire` leaves a fire patch),
-  `flame` (slowing, piercing). `fireGun` spawns, `updateShots` moves/hits
+  `flame` (slowing, piercing). `fireGun` spawns, `sysBullets` moves/hits
   (swept segment test from the hand — fast rounds and point-blank both hit),
-  `explode` does AoE
+  `explode(x,y,r,dmg,crit,src)` does AoE + `blastWorld` destruction
+- **ECS** — every short-lived object is a pooled entity: `eCreate(comp)` /
+  `eKill` (marks `M_DEAD`) / `eFlush` (end of frame) / `eReset`. Data is
+  SoA typed arrays (`PX PY VX VY LIFE KIND COL …`, `E_MAX` slots); one
+  `SparseSet` per component (`PARTS BULLETS PICKUPS ZOMBIES …` = `SETS[C_*]`),
+  iterate `set.dense[0..n)`. Zombies/texts keep a pooled object in
+  `ZO[e]`/`TXO[e]` (stable shape). Systems: `sysBullets sysFire sysZombies
+  sysEnemyShots sysParticles sysPickups sysTexts`, run by `updatePlay`.
+  Zombie neighbour queries go through the spatial hash (`queryEnemies`)
+- **Gore** — `damageEnemy(z,dmg,crit,ang,knock,how)` / `killEnemy(z,how)`;
+  `how` = `HOW_SHOT/GIB/FIRE/FLUNG` picks the death (ragdoll fling, gib
+  burst, charred). Blood/scorch `decal`s are painted into floor chunks and
+  logged in `chunkDecals` (ring, `DECAL_CAP`) so repaints replay them
+- **Destruction** — props have hp/state (`PS_OK SMOKE FUSE WRECK GONE
+  BROKEN`): `damageProp` → `destroyProp`/`blowProp` (cars smoke, burn, then
+  explode and chain). Building tiles break into `T_RUBBLE` via
+  `blastBuildings`/`destroyTile`. All of it persists in `WORLD`
+  (`props`/`tiles`/`cellTiles`), which `genCell` re-applies, so evicted
+  cells come back broken. Timed props live in `activeProps`
+- **Feel / score** — smoothed player velocity, dash (buffered, i-frames,
+  afterimages, "CLOSE CALL" near a zombie extends the combo), `G.trauma`
+  shake, `hitStop`, `slowMo`, WASTED. Kills feed `addKillScore`: combo
+  (3s window, a hit breaks it), multiplier `1 + combo/6` (max ×10), FRENZY
+  banners; `META.best` keeps the best score. Mouse held = manual aim (snaps
+  to a zombie within 18px), else auto-aim
+- **Text** — pixel font `font_atlas` (5×8). `ftext` is a drop-in for
+  `fillText` (reads `ctx.font`/`fillStyle`/`textAlign`); `ftx(str,x,y,size,
+  col,align,italic)`, `fmeasure`. Never use `ctx.fillText`
+- **HUD** (`renderHUD`) — weapon/ammo panel, segmented HP with lag, `$`
+  score counter, multiplier, threat stars, pager (`G.pager`, LCD typewriter),
+  `banner()` headlines (newest replaces older), King arrow, radar
 - **UN unlocks / META gold** — localStorage `orcslasher_unlocks` +
   `orcslasher_meta`; demo/heavy via 0.1% boss relic roll in `killEnemy`,
   ghost on reaching wave 10, commando (secret) on clearing wave 20, or buy
@@ -136,10 +167,11 @@ node -e "..."  # see scratchpad pattern: launch chromium with
                # page.keyboard / page.evaluate on the game's globals
 ```
 
-Useful globals for driving tests: `G` (state/wave/coins), `player`,
-`enemies`, `spawnQueue`, `bullets`, `WEAPONS`, `CLASSES`, `UN`, `DEV`,
+Useful globals for driving tests: `G` (state/wave/coins/score), `player`,
+`ZOMBIES` (`.n`, `.dense`) + `ZO[e]`, `clearZombies()`, `spawnEnemy(type,
+pos)`, `spawnQueue`, `BULLETS`, `WORLD`, `damageProp`, `WEAPONS`, `CLASSES`, `UN`, `DEV`,
 `pickCard()`, `leaveCampfire()`, `updatePlay(dt)` (call it in a loop for
-fast headless balance sims). Jump waves by clearing `enemies`/`spawnQueue` and
+fast headless balance sims). Jump waves with `clearZombies()`, `spawnQueue = []` and
 setting `G.wave` (set `G.endless = true` when jumping past wave 10).
 
 ## Publishing

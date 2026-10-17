@@ -17,9 +17,16 @@ offline, on desktop and phone.
 
 - **Move:** WASD / arrow keys, or drag anywhere on a touchscreen
 - **Shoot:** automatic — your hero aims at the nearest zombie, empties the
-  clip, reloads (the yellow pips / bar top-left show your ammo)
+  clip, reloads. Or **hold the mouse** to aim and fire yourself (it snaps
+  onto a zombie right under the crosshair)
 - **Dash:** Space / Shift (touch: the round button, bottom-right) — a burst
-  of speed with invincibility frames, 2s cooldown
+  of speed with invincibility frames, 1.6s cooldown. Dash past a zombie
+  for a **CLOSE CALL**
+
+**Score:** every kill pays `$`. Chain kills within 3 seconds for a combo —
+every 6 kills raises the multiplier (up to ×10), gibs pay ×1.5 and kills
+by exploding cars/barrels ×2. Taking a hit breaks the chain. Easy to
+play, hard to master.
 - **Menus:** click things, or press the number keys
 - **Pause:** P / Esc, or the ⏸ button top-right in combat
 - **Fullscreen:** the ⛶ button in the menu corner (or press F)
@@ -74,6 +81,12 @@ you're ready.
 
 On the weapon screen, banked gold buys **permanent gun upgrades**
 (+8% damage each, price climbing every level, max 5).
+
+**Everything breaks.** Shoot a car and it smokes, catches fire, then blows
+up — taking the zombies (and the car next to it) with it. Barrels, lamps,
+signs, hydrants, benches and trees all go down; rockets punch holes in
+buildings and leave rubble you can walk through. The damage stays for the
+whole run.
 
 Kill Patient Zero and endless mode opens. How deep can you go?
 
