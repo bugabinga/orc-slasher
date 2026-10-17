@@ -45,6 +45,12 @@ smashed and boarded windows; doors), wrecked cars in six colours and two
 orientations, streetlights, barrels, dumpster, trash, barricade, manhole,
 decals and a dead tree. Original, CC0.
 
+## assets/custom/city_k_* — Kenney "Roguelike Modern City" (CC0)
+
+Street furniture and junk cut from Kenney's pack
+(https://opengameart.org/content/roguelike-modern-city-pack, CC0) by
+`tools/extract_kenney.py`, desaturated and darkened to fit the dead city.
+
 ## assets/zombies/ — zombified enemy frames
 
 `tools/zombify.py` recolors every orc, goblin and ogre frame above (skin to
@@ -69,3 +75,6 @@ Gunshots and UI beeps are still synthesized live (WebAudio).
 
 - Kenney "Tiny Dungeon" (CC0) — https://kenney.nl/assets/tiny-dungeon
   (fetched as a backup pack during development; not committed)
+- The rest of Kenney's Roguelike Modern City (buildings, roads, cars):
+  16px CC0 and compatible, but bright and clean and auto-tiled — a full
+  swap would need hand-mapping hundreds of tiles

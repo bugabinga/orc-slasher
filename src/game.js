@@ -627,6 +627,19 @@ function genCell(ci, cj) {
     for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) fire(addProp("city_firebarrel", k.x + dx * 40, k.y + dy * 26, [-5, -6, 10, 6]));
     for (let i = 0; i < area / 16; i++) { const s = spot(); if (dist(s, k) > 50) addProp("city_tree", s.x, s.y, [-2, -3, 4, 3]); }
   }
+  // street furniture on the sidewalks, junk on roads and lots (Kenney, grimed)
+  const SIDEWALK = ["hydrant", "hydrant", "mailbox", "news", "news2", "bin", "bin2", "bench", "utility"];
+  const JUNK = ["cone", "cone", "tire", "tires", "box", "box2", "boxes", "rubble", "rubble2", "barrier", "barrelw"];
+  for (let i = 0; i < w * h / 40; i++) {
+    const tx = ri(x0, x1), ty = ri(y0, y1), t = T[L(tx, ty)];
+    const x = tx * TILE + ri(4, 12), y = ty * TILE + ri(10, 15);
+    if (t === T_WALK) {
+      const k = rp(SIDEWALK);
+      addProp("city_k_" + k, x, y, k === "bench" ? [-7, -4, 14, 4] : [-4, -4, 8, 4], { flip: R() < 0.5 });
+    } else if (t === T_ROAD ? R() < 0.45 : t === T_LOT) {
+      addProp("city_k_" + rp(JUNK), x, y, [-4, -4, 8, 4], { flip: R() < 0.5 });
+    }
+  }
   // alleys and setbacks collect dumpsters, barrels and fire barrels
   for (let i = 0; i < w * h / 70; i++) {
     const tx = ri(x0, x1), ty = ri(y0, y1);

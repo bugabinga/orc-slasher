@@ -21,6 +21,7 @@ assets/sprites/        0x72 DungeonTileset II frames (CC0)
 assets/craftpix/       CraftPix 4-direction orcs + hue-shift variants (generated)
 assets/custom/         original pixel art (make_custom_art.py; heroes/guns by make_gun_art.py)
 assets/zombies/        GENERATED — zombified enemy frames, override same-named sprites
+assets/sounds/         GENERATED — CC0 sfx as small MP3s (bundled as window.SOUNDS)
 assets/credits.json    source of truth for the in-game credits screen
 assets/CREDITS.md      license summary for humans
 docs/AUDIO.md          vetted libre audio shortlist
@@ -40,6 +41,8 @@ python3 tools/recolor_variants.py    # frost/night/blood orc recolors
 python3 tools/make_gun_art.py        # gunner heroes, guns, rocket/grenade
 python3 tools/make_city_art.py       # city tiles + props (city_*)
 python3 tools/zombify.py             # every orc/goblin/ogre frame -> assets/zombies/
+python3 tools/extract_kenney.py <sheet.png>  # grimed Kenney street props (rarely needed)
+python3 tools/build_sounds.py <zombies-dir> <residue-dir>  # CC0 sfx -> assets/sounds/
 python3 tools/build_assets.py        # everything + credits.json -> src/assets.js
 python3 tools/build_dist.py          # inline all -> dist/orc-slasher.html
 ```

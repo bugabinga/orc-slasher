@@ -27,10 +27,10 @@
         },
         {
           "name": "Kenney",
-          "work": "Tiny Dungeon pack — our trusty backup that never had to fight",
+          "work": "Roguelike Modern City — hydrants, mailboxes, newsboxes, bins, benches, cones, tires and street junk (grimed for the apocalypse)",
           "license": "CC0",
-          "url": "kenney.nl",
-          "thanks": "the patron saint of game jams everywhere."
+          "url": "opengameart.org/content/roguelike-modern-city-pack",
+          "thanks": "even the end of the world needs fire hydrants."
         }
       ]
     },
