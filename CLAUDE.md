@@ -210,6 +210,11 @@ setting `G.wave` (set `G.endless = true` when jumping past wave 10).
 
 ## Publishing
 
-The playable artifact (claude.ai) is the dist HTML re-wrapped without
-doctype/html/body tags; republish by rebuilding and publishing the same
-scratchpad file path. Keep `dist/` committed — it's the player download.
+Playable artifact: https://claude.ai/artifact/Kn513C5J2S3ecaDFe7Ks2a (private
+to its owner until shared). The page is `dist/orc-slasher.html` without the
+doctype/html/head/body tags (the host adds its own skeleton and pads `:root`
+for safe areas), prefixed with `<title>Zombie Blaster</title>` and a small
+style block: `:root` dark + `height:100%; box-sizing:border-box`, `body`
+`height:100%` and side-only safe-area padding. From a new session publish
+with that `url` (read it first). Keep `dist/` committed — it's the player
+download.
