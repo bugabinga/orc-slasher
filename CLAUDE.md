@@ -29,6 +29,7 @@ python3 tools/make_custom_art.py     # hand-drawn sprites -> assets/custom/
 python3 tools/extract_craftpix.py <pack-dir>  # slice CraftPix sheets (rarely needed)
 python3 tools/recolor_variants.py    # frost/night/blood orc recolors
 python3 tools/make_gun_art.py        # gunner heroes, guns, rocket/grenade
+python3 tools/make_city_art.py       # city tiles + props (city_*)
 python3 tools/zombify.py             # every orc/goblin/ogre frame -> assets/zombies/
 python3 tools/build_assets.py        # everything + credits.json -> src/assets.js
 python3 tools/build_dist.py          # inline all -> dist/orc-slasher.html
@@ -69,11 +70,18 @@ src/game.js` before building.
   by `rollRarity(luck)`; pick 1-of-3 per banked level; `META.wpn` weapon
   levels bought via `tryUpgradeWeapon` on the select screen; shop
   spends `G.coins` (reroll/heal/extra pick), leave via NEXT WAVE
+- **Map** (`buildMap`) — random abandoned city, 120×80 tiles: road grid
+  (`vx`/`hy`), blocks of buildings / parks / lots, east plaza with the
+  King. Buildings are `solidGrid` tiles; cars, barrels, lamps, trees are
+  `props` (drawn live, y-sorted) whose rects sit in `propGrid` per tile.
+  `collideSolids` / `inRock` only look at nearby tiles. Zombies follow a
+  BFS flow field (`updateFlow` every 0.25s, `flowDir`) and spawn at
+  `spawnSpots` (manholes + doors) 170–380px from the player
 - **States**: title → credits (optional) → cls → select → play ⇄ campfire
   → gameover/victory. All input goes through `handleKey` / `handleClick`
 - **Rendering**: 480×270 internal canvas, pixel-perfect (`image-rendering:
   pixelated`), feet-anchored `drawSprite`, y-sorted entities, offscreen
-  floor canvas, darkness overlay with radial "punch" lights, screenshake,
+  floor canvas, minimap, darkness overlay with radial "punch" lights, screenshake,
   damage-number texts
 
 ## Conventions

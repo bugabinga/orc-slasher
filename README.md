@@ -1,6 +1,6 @@
 # 🧟 ZOMBIE BLASTER
 
-One soldier. A dark cave. Endless waves of the dead.
+One soldier. A dead city. Endless waves of the dead.
 
 A Brotato-style 2D pixel roguelike: your hero shoots on their own — you
 dodge, dash, hoover up XP gems, and shape your build with upgrade cards at
@@ -47,7 +47,14 @@ grenades explode, the flamethrower burns through whole crowds.
 gold you're holding when a run ends is banked. Spend the bank on the hero
 select screen to unlock new classes.
 
-## The cave
+## The city
+
+A new abandoned city is generated every run: a grid of four-lane streets
+littered with burnt-out wrecks and roadblocks, sidewalks under flickering
+streetlights (a quarter of them dead), brick and concrete blocks, dead parks
+and rubble lots. The dead climb out of **manholes** and burst through
+**doorways** just beyond your sight. Somewhere in the east plaza hangs the
+King — the gold dot on the minimap (bottom-left) shows where.
 
 Over a dozen kinds of zombie hunt you, from crawler swarms to frozen
 corpses, stalkers, acid spitters and armored gorehulks. **Every 5th wave a

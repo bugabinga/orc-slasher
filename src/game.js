@@ -1,4 +1,4 @@
-/* ZOMBIE BLASTER — a Brotato-style cave roguelike with guns.
+/* ZOMBIE BLASTER — a Brotato-style roguelike with guns, in an abandoned city.
  * Sprites: 0x72 DungeonTileset II (CC0) + CraftPix + original art, all
  * zombified by tools/zombify.py (see assets/CREDITS.md).
  */
@@ -11,7 +11,7 @@ ctx.imageSmoothingEnabled = false;
 const VW = canvas.width, VH = canvas.height;
 
 const TILE = 16;
-const MAP_W = 58, MAP_H = 34;
+const MAP_W = 120, MAP_H = 80;
 const WORLD_W = MAP_W * TILE, WORLD_H = MAP_H * TILE;
 const FINAL_WAVE = 10;
 
@@ -56,8 +56,6 @@ const ANIM = {
   shamanking_idle: ["orc_shamanking_idle_f0", "orc_shamanking_idle_f1", "orc_shamanking_idle_f2", "orc_shamanking_idle_f3"],
   shamanking_run: ["orc_shamanking_run_f0", "orc_shamanking_run_f1", "orc_shamanking_run_f2", "orc_shamanking_run_f3"],
   campfire: ["campfire_f0", "campfire_f1", "campfire_f2", "campfire_f3"],
-  mushroom: ["mushroom_glow_f0", "mushroom_glow_f1"],
-  torch: ["torch_f0", "torch_f1"],
   king: ["hanging_king_f0", "hanging_king_f1"],
   gem: ["xp_gem_f0", "xp_gem_f1"],
   coin: ["coin_f0", "coin_f1", "coin_f2", "coin_f3"],
@@ -92,7 +90,7 @@ function audio() {
   return AC;
 }
 
-// ambient cave loop: slow minor bassline + sparse arpeggio, all synthesized
+// ambient night loop: slow minor bassline + sparse arpeggio, all synthesized
 const MUSIC = { started: false, nextT: 0, step: 0 };
 const M_BASS = [55.0, 55.0, 65.41, 65.41, 43.65, 43.65, 49.0, 49.0]; // A1 C2 F1 G1
 const M_ARP = [220, 261.63, 329.63, 440, 329.63, 261.63];
@@ -270,164 +268,386 @@ function animFrame(list, t, fps = 8) {
 }
 
 // ------------------------------------------------------------------- map ---
-let floorCanvas = null;
-let solids = []; // {x,y,w,h} world-space rects
+// an abandoned city: a grid of 4-lane roads with sidewalks; the blocks
+// between them hold buildings (solid), dead parks and rubble lots, and
+// wrecks litter the streets. Solids live in a tile grid (buildings) plus
+// per-tile lists of prop rects (cars, barrels, trees…)
+const T_BLD = 0, T_ROAD = 1, T_WALK = 2, T_LOT = 3, T_GRASS = 4, T_PLAZA = 5;
+let floorCanvas = null, miniCanvas = null;
+let solidGrid = null, propGrid = null, walkGrid = null;
+let props = [];       // y-sorted, drawn live: { img, x, y (feet), flip, rect, fire, fireY }
+let lamps = [], spawnSpots = [], kingPos = null, startPos = null;
 
-let mushrooms = [], torches = [], spawnPits = [], kingPos = null;
+const tileAt = (x, y) => clamp(Math.floor(y / TILE), 0, MAP_H - 1) * MAP_W + clamp(Math.floor(x / TILE), 0, MAP_W - 1);
 
 function buildMap() {
-  solids = [];
-  mushrooms = [];
+  props = []; lamps = []; spawnSpots = [];
+  const N = MAP_W * MAP_H;
+  const T = new Uint8Array(N).fill(T_LOT);
+  const bid = new Int16Array(N).fill(-1); // building id per tile; -2 = city edge
+  const at = (tx, ty) => ty * MAP_W + tx;
+  const EDGE = 2;
+
+  // road grid
+  const vx = [], hy = [];
+  for (let x = irnd(7, 10); x < MAP_W - 12; x += irnd(17, 23)) vx.push(x);
+  for (let y = irnd(6, 8); y < MAP_H - 10; y += irnd(13, 17)) hy.push(y);
+  const inV = tx => vx.some(x => tx >= x && tx <= x + 3);
+  const inH = ty => hy.some(y => ty >= y && ty <= y + 3);
+  for (let ty = 0; ty < MAP_H; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      const i = at(tx, ty);
+      if (tx < EDGE || ty < EDGE || tx >= MAP_W - EDGE || ty >= MAP_H - EDGE) { T[i] = T_BLD; bid[i] = -2; }
+      else if (inV(tx) || inH(ty)) T[i] = T_ROAD;
+      else if (vx.some(x => tx === x - 1 || tx === x + 4) || hy.some(y => ty === y - 1 || ty === y + 4)) T[i] = T_WALK;
+    }
+  }
+  // the player starts on the crossroads nearest the middle
+  let best = 1e9;
+  for (const x of vx) for (const y of hy) {
+    const d = Math.hypot(x + 2 - MAP_W / 2, y + 2 - MAP_H / 2);
+    if (d < best) { best = d; startPos = { x: (x + 2) * TILE, y: (y + 2) * TILE }; }
+  }
+  const nearStart = (x, y, r) => Math.hypot(x - startPos.x, y - startPos.y) < r;
+
+  // blocks: the rectangles between the sidewalks
+  const cols = [], rows = [];
+  for (let i = 0; i <= vx.length; i++) cols.push([i ? vx[i - 1] + 5 : EDGE, i < vx.length ? vx[i] - 2 : MAP_W - EDGE - 1]);
+  for (let i = 0; i <= hy.length; i++) rows.push([i ? hy[i - 1] + 5 : EDGE, i < hy.length ? hy[i] - 2 : MAP_H - EDGE - 1]);
+  const blocks = [];
+  for (const [x0, x1] of cols) for (const [y0, y1] of rows) if (x1 - x0 >= 2 && y1 - y0 >= 2) blocks.push({ x0, x1, y0, y1 });
+  // the King hangs in a plaza on the east side
+  let kingBlock = null; best = 1e9;
+  for (const b of blocks) {
+    const d = Math.hypot((b.x0 + b.x1) / 2 - MAP_W * 0.82, (b.y0 + b.y1) / 2 - MAP_H / 2);
+    if (d < best && b.x1 - b.x0 >= 5 && b.y1 - b.y0 >= 5) { best = d; kingBlock = b; }
+  }
+
+  const buildings = [];
+  const WALL_STYLES = ["brick", "concrete", "beige"];
+  function addBuilding(x0, x1, y0, y1) {
+    const id = buildings.length;
+    const w = x1 - x0 + 1, doors = new Set([x0 + irnd(1, Math.max(1, w - 2))]);
+    if (w >= 7 && Math.random() < 0.5) doors.add(x0 + irnd(1, w - 2));
+    buildings.push({ x0, x1, y0, y1, wall: pick(WALL_STYLES), roof: irnd(0, 2), doors });
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) { T[at(tx, ty)] = T_BLD; bid[at(tx, ty)] = id; }
+  }
+  function buildingRow(b, y0, y1) {
+    let x = b.x0;
+    while (x <= b.x1) {
+      let w = irnd(4, 8);
+      if (b.x1 - (x + w - 1) < 4) w = b.x1 - x + 1; // swallow a sliver too thin to build on
+      const yb = y1 - (Math.random() < 0.25 ? 1 : 0); // some stand back from the street
+      if (yb - y0 >= 2) addBuilding(x, x + w - 1, y0, yb);
+      x += w;
+      if (x <= b.x1 - 4 && Math.random() < 0.3) x++; // alley
+    }
+  }
+  const fillType = (b, t) => { for (let ty = b.y0; ty <= b.y1; ty++) for (let tx = b.x0; tx <= b.x1; tx++) T[at(tx, ty)] = t; };
+  const kinds = [];
+  for (const b of blocks) {
+    if (b === kingBlock) { fillType(b, T_PLAZA); kinds.push("plaza"); continue; }
+    const r = Math.random();
+    if (r < 0.68 && b.x1 - b.x0 >= 3 && b.y1 - b.y0 >= 3) {
+      if (b.y1 - b.y0 >= 10 && Math.random() < 0.55) { // two rows facing a back alley
+        const mid = Math.floor((b.y0 + b.y1) / 2);
+        buildingRow(b, b.y0, mid - 1);
+        buildingRow(b, mid + 1, b.y1);
+      } else buildingRow(b, b.y0, b.y1);
+      kinds.push("bld");
+    } else if (r < 0.84) { fillType(b, T_GRASS); kinds.push("park"); }
+    else kinds.push("lot");
+  }
+  solidGrid = new Uint8Array(N);
+  for (let i = 0; i < N; i++) solidGrid[i] = T[i] === T_BLD ? 1 : 0;
+  const walkable = (tx, ty) => tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H && T[at(tx, ty)] !== T_BLD;
+
+  // ---- props (solid ones also go into propGrid)
+  const free = (x, y, w, h, pad = 3) => {
+    for (let ty = Math.floor((y - pad) / TILE); ty <= Math.floor((y + h + pad) / TILE); ty++) {
+      for (let tx = Math.floor((x - pad) / TILE); tx <= Math.floor((x + w + pad) / TILE); tx++) if (!walkable(tx, ty)) return false;
+    }
+    return !props.some(p => p.rect && x < p.rect.x + p.rect.w + pad && x + w + pad > p.rect.x && y < p.rect.y + p.rect.h + pad && y + h + pad > p.rect.y);
+  };
+  // rect: footprint relative to the feet point
+  function addProp(img, x, y, rect, extra = {}) {
+    const r = rect ? { x: x + rect[0], y: y + rect[1], w: rect[2], h: rect[3] } : null;
+    if (r && (!free(r.x, r.y, r.w, r.h) || (r.w > 8 && nearStart(x, y, 7 * TILE)))) return null; // keep the start clear of wrecks
+    const p = { img, x, y, rect: r, flip: false, t: rnd(0, 9), ...extra };
+    props.push(p);
+    return p;
+  }
+  const CAR_COLORS = ["red", "blue", "white", "green", "rust", "rust", "burnt"];
+  const car = (x, y, vertical) => {
+    const col = pick(CAR_COLORS);
+    const p = vertical
+      ? addProp(`city_car_v_${col}`, x, y, [-8, -28, 16, 26])
+      : addProp(`city_car_h_${col}`, x, y, [-15, -14, 30, 12], { flip: Math.random() < 0.5 });
+    if (p && col === "burnt" && Math.random() < 0.6) { p.fire = true; p.fireY = vertical ? 18 : 12; }
+  };
+  // wrecks on the roads
+  for (const x of vx) {
+    for (let ty = EDGE; ty < MAP_H - EDGE; ty += irnd(5, 11)) {
+      if (inH(ty) || inH(ty - 2)) continue;
+      car((x + (Math.random() < 0.5 ? 1 : 3)) * TILE, ty * TILE + rnd(0, 8), true);
+    }
+  }
+  for (const y of hy) {
+    for (let tx = EDGE; tx < MAP_W - EDGE; tx += irnd(5, 11)) {
+      if (inV(tx) || inV(tx + 1)) continue;
+      car(tx * TILE + rnd(0, 8), (y + (Math.random() < 0.5 ? 2 : 4)) * TILE - 2, false);
+    }
+  }
+  // roadblocks: a jersey barrier half across some street segments
+  for (let i = 0; i < Math.round(vx.length * hy.length * 0.6); i++) {
+    if (Math.random() < 0.5) {
+      const x = pick(vx), ty = irnd(EDGE + 2, MAP_H - EDGE - 3);
+      if (!inH(ty)) addProp("city_barricade", (x + (Math.random() < 0.5 ? 1 : 3)) * TILE, ty * TILE, [-15, -8, 30, 7]);
+    } else {
+      const y = pick(hy), tx = irnd(EDGE + 2, MAP_W - EDGE - 3);
+      if (!inV(tx)) addProp("city_barricade", tx * TILE, (y + 2) * TILE + (Math.random() < 0.5 ? 0 : 16), [-15, -8, 30, 7]);
+    }
+  }
+  // streetlights along every sidewalk, a quarter of them dead
+  const lamp = (tx, ty, flip) => {
+    if (!walkable(tx, ty)) return;
+    const x = tx * TILE + 8, y = ty * TILE + 14;
+    const p = addProp("city_lamp", x, y, [-2, -3, 4, 3], { flip });
+    if (!p) return;
+    const broken = Math.random() < 0.25;
+    if (broken) p.img = "city_lamp_broken";
+    else lamps.push({ x: x + (flip ? -7 : 7), y: y - 10, flicker: Math.random() < 0.15, t: rnd(0, 9) });
+  };
+  for (const x of vx) for (let ty = EDGE + 2; ty < MAP_H - EDGE - 1; ty += 6) {
+    if (inH(ty) || inH(ty + 1) || inH(ty - 1)) continue;
+    lamp(x - 1, ty, false); lamp(x + 4, ty + 3, true);
+  }
+  for (const y of hy) for (let tx = EDGE + 3; tx < MAP_W - EDGE - 1; tx += 7) {
+    if (inV(tx) || inV(tx + 1) || inV(tx - 1)) continue;
+    lamp(tx, y - 1, Math.random() < 0.5); lamp(tx + 3, y + 4, Math.random() < 0.5);
+  }
+  // block fillings
+  const spotIn = b => ({ x: rnd(b.x0 * TILE + 10, (b.x1 + 1) * TILE - 10), y: rnd(b.y0 * TILE + 16, (b.y1 + 1) * TILE - 4) });
+  blocks.forEach((b, k) => {
+    const area = (b.x1 - b.x0 + 1) * (b.y1 - b.y0 + 1);
+    if (kinds[k] === "park") {
+      for (let i = 0; i < area / 12; i++) { const s = spotIn(b); addProp("city_tree", s.x, s.y, [-2, -3, 4, 3]); }
+    } else if (kinds[k] === "lot") {
+      for (let i = 0; i < area / 22; i++) { const s = spotIn(b); car(s.x, s.y, Math.random() < 0.5); }
+      for (let i = 0; i < area / 30; i++) {
+        const s = spotIn(b);
+        const p = addProp(Math.random() < 0.5 ? "city_firebarrel" : pick(["city_barrel", "city_barrel_blue"]), s.x, s.y, [-5, -6, 10, 6]);
+        if (p && p.img === "city_firebarrel") { p.fire = true; p.fireY = 12; }
+      }
+      for (let i = 0; i < area / 40; i++) { const s = spotIn(b); addProp("city_dumpster", s.x, s.y, [-13, -10, 26, 9]); }
+    } else if (kinds[k] === "plaza") {
+      kingPos = { x: ((b.x0 + b.x1 + 1) / 2) * TILE, y: ((b.y0 + b.y1 + 1) / 2) * TILE + 8 };
+      addProp(null, kingPos.x, kingPos.y, [-15, -3, 4, 4], { gallows: true });
+      for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        const p = addProp("city_firebarrel", kingPos.x + dx * 40, kingPos.y + dy * 26, [-5, -6, 10, 6]);
+        if (p) { p.fire = true; p.fireY = 12; }
+      }
+      for (let i = 0; i < area / 16; i++) { const s = spotIn(b); if (dist(s, kingPos) > 50) addProp("city_tree", s.x, s.y, [-2, -3, 4, 3]); }
+    }
+  });
+  // alleys and lots between buildings get dumpsters, bags and barrels
+  for (let i = 0; i < N / 70; i++) {
+    const tx = irnd(EDGE, MAP_W - EDGE - 1), ty = irnd(EDGE, MAP_H - EDGE - 1);
+    if (T[at(tx, ty)] !== T_LOT && T[at(tx, ty)] !== T_WALK) continue;
+    const x = tx * TILE + 8, y = ty * TILE + 12, r = Math.random();
+    if (r < 0.25) addProp("city_dumpster", x, y, [-13, -10, 26, 9]);
+    else if (r < 0.55) addProp(pick(["city_barrel", "city_barrel_blue"]), x, y, [-5, -6, 10, 6]);
+    else if (r < 0.7) { const p = addProp("city_firebarrel", x, y, [-5, -6, 10, 6]); if (p) { p.fire = true; p.fireY = 12; } }
+  }
+
+  propGrid = Array.from({ length: N }, () => []);
+  walkGrid = new Uint8Array(N);
+  for (let i = 0; i < N; i++) walkGrid[i] = solidGrid[i] ? 0 : 1;
+  for (const p of props) {
+    const r = p.rect;
+    if (!r) continue;
+    for (let ty = Math.floor(r.y / TILE); ty <= Math.floor((r.y + r.h) / TILE); ty++) {
+      for (let tx = Math.floor(r.x / TILE); tx <= Math.floor((r.x + r.w) / TILE); tx++) {
+        if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue;
+        propGrid[at(tx, ty)].push(r);
+        const cx = tx * TILE + 8, cy = ty * TILE + 8;
+        if (cx > r.x && cx < r.x + r.w && cy > r.y && cy < r.y + r.h) walkGrid[at(tx, ty)] = 0;
+      }
+    }
+  }
+
+  // ---- paint the floor canvas
   floorCanvas = document.createElement("canvas");
   floorCanvas.width = WORLD_W; floorCanvas.height = WORLD_H + 8;
   const fc = floorCanvas.getContext("2d");
   fc.imageSmoothingEnabled = false;
-
-  // rocky cave outline: border depth undulates, so no straight walls
-  const rock = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(false));
-  const s1 = rnd(0, 9), s2 = rnd(0, 9), s3 = rnd(0, 9), s4 = rnd(0, 9);
-  const depth = (i, seed) => clamp(Math.round(2.2 + Math.sin(i * 0.55 + seed) * 1.1 + Math.sin(i * 0.23 + seed * 2.7) * 0.9 + rnd(-0.3, 0.3)), 1, 4);
-  const dTop = [], dBot = [], dL = [], dR = [];
-  for (let tx = 0; tx < MAP_W; tx++) { dTop[tx] = depth(tx, s1); dBot[tx] = depth(tx, s2); }
-  for (let ty = 0; ty < MAP_H; ty++) { dL[ty] = depth(ty, s3); dR[ty] = depth(ty, s4); }
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      rock[ty][tx] = ty < dTop[tx] || ty >= MAP_H - dBot[tx] || tx < dL[ty] || tx >= MAP_W - dR[ty];
-    }
-  }
-  // interior rock outcrops, kept away from the center spawn
-  for (let i = 0; i < 7; i++) {
-    const bx = irnd(7, MAP_W - 8), by = irnd(6, MAP_H - 7), br = rnd(1.2, 2.4);
-    if (Math.abs(bx - MAP_W / 2) < 7 && Math.abs(by - MAP_H / 2) < 5) continue;
-    for (let ty = Math.max(1, by - 3); ty < Math.min(MAP_H - 1, by + 4); ty++) {
-      for (let tx = Math.max(1, bx - 3); tx < Math.min(MAP_W - 1, bx + 4); tx++) {
-        if (Math.hypot(tx - bx, ty - by) <= br + rnd(-0.3, 0.3)) rock[ty][tx] = true;
-      }
-    }
-  }
-  // the king's alcove on the east wall: deep rock behind, clear floor in front
-  const kty = Math.floor(MAP_H / 2);
-  for (let ty = kty - 2; ty <= kty + 2; ty++) {
-    for (let tx = MAP_W - 3; tx < MAP_W; tx++) rock[ty][tx] = true;
-    for (let tx = MAP_W - 7; tx < MAP_W - 3; tx++) rock[ty][tx] = false;
-  }
-  kingPos = { x: (MAP_W - 3) * TILE + 8, y: (kty + 1) * TILE + 2 };
-
-  // two great spawn pits on opposite flanks — the horde crawls out of these
-  spawnPits = [];
-  const pitSpots = [
-    { tx: irnd(8, 14), ty: irnd(8, MAP_H - 9) },
-    { tx: irnd(MAP_W - 15, MAP_W - 9), ty: irnd(8, MAP_H - 9) },
-  ];
-  for (const p of pitSpots) {
-    for (let ty = p.ty - 2; ty <= p.ty + 2; ty++) { // keep the mouths clear of rock
-      for (let tx = p.tx - 3; tx <= p.tx + 3; tx++) {
-        if (ty > 0 && ty < MAP_H - 1 && tx > 0 && tx < MAP_W - 1) rock[ty][tx] = false;
-      }
-    }
-    spawnPits.push({ x: p.tx * TILE + 8, y: p.ty * TILE + 8 });
-  }
-
-  // draw tiles (fallback fills survive a stale-cache sprite mismatch)
-  const tileDraw = (name, x, y, fb) => {
+  const put = (name, x, y, fb) => {
     const im = IMG[name];
     if (imgOk(im)) fc.drawImage(im, x, y);
-    else { fc.fillStyle = fb; fc.fillRect(x, y, TILE, TILE); }
+    else if (fb) { fc.fillStyle = fb; fc.fillRect(x, y, TILE, TILE); } // survives a stale-cache sprite mismatch
   };
+  const hash = (tx, ty) => ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
+  const WIN = ["win0", "win0", "win0", "win0", "win2", "win2", "win3", "win3", "win1"];
   for (let ty = 0; ty < MAP_H; ty++) {
     for (let tx = 0; tx < MAP_W; tx++) {
-      if (rock[ty][tx]) tileDraw(`cave_wall_${(tx * 7 + ty * 13) % 2}`, tx * TILE, ty * TILE, "#1b1620");
-      else tileDraw(`cave_floor_${(tx * 5 + ty * 11 + irnd(0, 1)) % 4}`, tx * TILE, ty * TILE, "#393130");
-    }
-  }
-  // lit rim where rock meets floor below — sells the depth
-  fc.fillStyle = "rgba(96,80,86,0.5)";
-  for (let ty = 0; ty < MAP_H - 1; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      if (rock[ty][tx] && !rock[ty + 1][tx]) fc.fillRect(tx * TILE, ty * TILE + TILE - 2, TILE, 2);
-    }
-  }
-  // the pit mouths: black depth fading to a lit far rim
-  for (const p of spawnPits) {
-    const grad = fc.createRadialGradient(p.x, p.y, 3, p.x, p.y, 26);
-    grad.addColorStop(0, "rgba(4,3,8,1)");
-    grad.addColorStop(0.62, "rgba(10,8,16,0.96)");
-    grad.addColorStop(0.82, "rgba(30,24,32,0.55)");
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    fc.save();
-    fc.translate(p.x, p.y); fc.scale(1, 0.62); fc.translate(-p.x, -p.y);
-    fc.fillStyle = grad;
-    fc.fillRect(p.x - 28, p.y - 28, 56, 56);
-    fc.restore();
-    fc.fillStyle = "rgba(96,80,86,0.45)";
-    fc.fillRect(p.x - 14, p.y - 11, 28, 2);
-  }
-  // solids: merge horizontal runs of rock per row
-  for (let ty = 0; ty < MAP_H; ty++) {
-    let run = -1;
-    for (let tx = 0; tx <= MAP_W; tx++) {
-      const r = tx < MAP_W && rock[ty][tx];
-      if (r && run < 0) run = tx;
-      else if (!r && run >= 0) {
-        solids.push({ x: run * TILE, y: ty * TILE, w: (tx - run) * TILE, h: TILE });
-        run = -1;
+      const i = at(tx, ty), h = hash(tx, ty), x = tx * TILE, y = ty * TILE, t = T[i];
+      if (t === T_ROAD) put(`city_road_${h % 13 === 0 ? 3 : h % 3}`, x, y, "#38383e");
+      else if (t === T_WALK) put(`city_walk_${h % 5 === 0 ? 1 : 0}`, x, y, "#76726e");
+      else if (t === T_LOT) put(`city_lot_${h % 3}`, x, y, "#52483c");
+      else if (t === T_GRASS) put(`city_grass_${h % 2}`, x, y, "#464c2e");
+      else if (t === T_PLAZA) put(`city_plaza_${(tx + ty) % 2}`, x, y, "#706054");
+      else {
+        const b = buildings[bid[i]] || { wall: "concrete", roof: 0, doors: new Set() };
+        const below1 = ty + 1 < MAP_H && T[i + MAP_W] !== T_BLD;
+        const below2 = ty + 2 < MAP_H && T[i + 2 * MAP_W] !== T_BLD && T[i + MAP_W] === T_BLD;
+        if (below1) put(b.doors.has(tx) ? `city_wall_${b.wall}_door${h % 3 === 0 ? 1 : 0}` : `city_wall_${b.wall}_${WIN[h % WIN.length]}`, x, y, "#5a4c48");
+        else if (below2) put(`city_wall_${b.wall}_${WIN[(h >> 3) % WIN.length]}`, x, y, "#5a4c48");
+        else {
+          put(`city_roof_${b.roof}`, x, y, "#403e44");
+          // parapet: dark edge where the roof meets another building or the sky
+          fc.fillStyle = "#1a161e";
+          if (ty === 0 || bid[i - MAP_W] !== bid[i]) fc.fillRect(x, y, TILE, 2);
+          if (tx === 0 || bid[i - 1] !== bid[i]) fc.fillRect(x, y, 1, TILE);
+          if (tx === MAP_W - 1 || bid[i + 1] !== bid[i]) fc.fillRect(x + TILE - 1, y, 1, TILE);
+          if (h % 17 === 0 && bid[i] >= 0) put(h % 2 ? "city_ac" : "city_vent", x + 2, y + 3);
+        }
+        if (below1 && b.doors.has(tx) && bid[i] >= 0) spawnSpots.push({ x: x + 8, y: y + TILE + 8 });
       }
     }
   }
+  // curbs, facade shadows, lane markings, crosswalks
+  for (let ty = 0; ty < MAP_H; ty++) {
+    for (let tx = 0; tx < MAP_W; tx++) {
+      const i = at(tx, ty), x = tx * TILE, y = ty * TILE;
+      if (T[i] === T_WALK) {
+        fc.fillStyle = "rgba(30,28,34,0.8)";
+        if (tx + 1 < MAP_W && T[i + 1] === T_ROAD) fc.fillRect(x + 15, y, 1, TILE);
+        if (tx > 0 && T[i - 1] === T_ROAD) fc.fillRect(x, y, 1, TILE);
+        if (ty + 1 < MAP_H && T[i + MAP_W] === T_ROAD) fc.fillRect(x, y + 15, TILE, 1);
+        if (ty > 0 && T[i - MAP_W] === T_ROAD) fc.fillRect(x, y, TILE, 1);
+      }
+      if (T[i] !== T_BLD && ty > 0 && T[i - MAP_W] === T_BLD) {
+        fc.fillStyle = "rgba(0,0,0,0.35)"; fc.fillRect(x, y, TILE, 3);
+      }
+    }
+  }
+  fc.fillStyle = "rgba(196,160,60,0.75)";
+  for (const x of vx) for (let ty = EDGE; ty < MAP_H - EDGE; ty++) {
+    if (!inH(ty) && !hy.some(y => ty === y - 1 || ty === y + 4)) fc.fillRect((x + 2) * TILE - 1, ty * TILE + 3, 2, 9);
+  }
+  for (const y of hy) for (let tx = EDGE; tx < MAP_W - EDGE; tx++) {
+    if (!inV(tx) && !vx.some(x => tx === x - 1 || tx === x + 4)) fc.fillRect(tx * TILE + 3, (y + 2) * TILE - 1, 9, 2);
+  }
+  for (const x of vx) for (const y of hy) {
+    for (let k = 0; k < 4; k++) {
+      for (const ty of [y - 1, y + 4]) if (T[at(x + k, ty)] === T_ROAD) put("city_cross_v", (x + k) * TILE, ty * TILE);
+      for (const tx of [x - 1, x + 4]) if (T[at(tx, y + k)] === T_ROAD) put("city_cross_h", tx * TILE, (y + k) * TILE);
+    }
+  }
+  // decals: cracks, blood, bones; sewer manholes the dead climb out of
+  for (let ty = EDGE; ty < MAP_H - EDGE; ty++) {
+    for (let tx = EDGE; tx < MAP_W - EDGE; tx++) {
+      const i = at(tx, ty), x = tx * TILE, y = ty * TILE;
+      if (T[i] === T_BLD || !walkGrid[i]) continue;
+      const r = Math.random();
+      if (T[i] === T_ROAD && r < 0.05) put("city_crack", x, y);
+      else if (r < 0.065) put("city_blood", x, y);
+      else if (r < 0.07) put(Math.random() < 0.5 ? "skull" : "bone_pile", x + 2, y + 6);
+      else if (r < 0.085 && T[i] !== T_ROAD) put("city_trash", x, y + 5);
+    }
+  }
+  for (const x of vx) for (let ty = EDGE + 3; ty < MAP_H - EDGE - 3; ty += irnd(8, 12)) {
+    const tx = x + irnd(0, 2);
+    if (inH(ty) || !walkGrid[at(tx, ty)]) continue;
+    put("city_manhole", tx * TILE + 4, ty * TILE + 6);
+    spawnSpots.push({ x: tx * TILE + 10, y: ty * TILE + 12 });
+  }
+  for (const y of hy) for (let tx = EDGE + 3; tx < MAP_W - EDGE - 3; tx += irnd(9, 14)) {
+    const ty = y + irnd(0, 2);
+    if (inV(tx) || !walkGrid[at(tx, ty)]) continue;
+    put("city_manhole", tx * TILE + 4, ty * TILE + 6);
+    spawnSpots.push({ x: tx * TILE + 10, y: ty * TILE + 12 });
+  }
+  if (kingPos) { // dried blood under the gallows
+    fc.fillStyle = "rgba(110,20,26,0.75)";
+    fc.beginPath(); fc.ellipse(kingPos.x, kingPos.y + 3, 9, 3, 0, 0, Math.PI * 2); fc.fill();
+  }
 
-  // decorations on open floor
-  const freeTile = () => {
-    for (let i = 0; i < 40; i++) {
-      const tx = irnd(3, MAP_W - 4), ty = irnd(3, MAP_H - 4);
-      if (!rock[ty][tx] && !rock[ty + 1] [tx] && (Math.abs(tx - MAP_W / 2) > 4 || Math.abs(ty - MAP_H / 2) > 4)) return { tx, ty };
-    }
-    return null;
-  };
-  for (let i = 0; i < 5; i++) { // blocking stalagmites
-    const t = freeTile();
-    if (!t) continue;
-    if (imgOk(IMG.stalagmite_big)) fc.drawImage(IMG.stalagmite_big, t.tx * TILE + 2, t.ty * TILE + 3);
-    solids.push({ x: t.tx * TILE + 3, y: t.ty * TILE + 7, w: 10, h: 7 });
+  // minimap: one pixel per tile
+  miniCanvas = document.createElement("canvas");
+  miniCanvas.width = MAP_W; miniCanvas.height = MAP_H;
+  const mc = miniCanvas.getContext("2d");
+  const MCOL = ["#1c1820", "#55555e", "#7a7672", "#4e4438", "#46502e", "#7a6250"];
+  for (let i = 0; i < N; i++) { mc.fillStyle = MCOL[T[i]]; mc.fillRect(i % MAP_W, Math.floor(i / MAP_W), 1, 1); }
+}
+
+// push a circle out of one rect; a center buried inside exits by the nearest side
+function pushOut(x, y, r, s) {
+  const cx = clamp(x, s.x, s.x + s.w), cy = clamp(y, s.y, s.y + s.h);
+  const dx = x - cx, dy = y - cy, d2 = dx * dx + dy * dy;
+  if (d2 >= r * r) return [x, y];
+  if (d2 === 0) {
+    const l = x - s.x, rr = s.x + s.w - x, t = y - s.y, b = s.y + s.h - y, m = Math.min(l, rr, t, b);
+    if (m === l) return [s.x - r, y];
+    if (m === rr) return [s.x + s.w + r, y];
+    if (m === t) return [x, s.y - r];
+    return [x, s.y + s.h + r];
   }
-  for (let i = 0; i < 6; i++) {
-    const t = freeTile();
-    if (t && imgOk(IMG.stalagmite_small)) fc.drawImage(IMG.stalagmite_small, t.tx * TILE + 4, t.ty * TILE + 6);
-  }
-  for (let i = 0; i < 5; i++) {
-    const t = freeTile();
-    const im = IMG[i % 2 ? "bone_pile" : "skull"];
-    if (t && imgOk(im)) fc.drawImage(im, t.tx * TILE + 2, t.ty * TILE + 5);
-  }
-  for (let i = 0; i < 7; i++) { // glowing mushrooms are drawn live (they flicker)
-    const t = freeTile();
-    if (t) mushrooms.push({ x: t.tx * TILE + 8, y: t.ty * TILE + 12, t: rnd(0, 9) });
-  }
-  // torches mounted on south-facing rock rims
-  torches = [];
-  const rims = [];
-  for (let ty = 1; ty < MAP_H - 1; ty++) {
-    for (let tx = 2; tx < MAP_W - 2; tx++) {
-      if (rock[ty][tx] && !rock[ty + 1][tx]) rims.push({ tx, ty });
-    }
-  }
-  for (let i = 0; i < 10 && rims.length; i++) {
-    const r = rims.splice(irnd(0, rims.length - 1), 1)[0];
-    if (torches.some(t => Math.abs(t.x - r.tx * TILE) < TILE * 4 && Math.abs(t.y - r.ty * TILE) < TILE * 3)) continue;
-    torches.push({ x: r.tx * TILE + 8, y: r.ty * TILE + 15, t: rnd(0, 9) });
-  }
+  const d = Math.sqrt(d2);
+  return [cx + (dx / d) * r, cy + (dy / d) * r];
 }
 
 function collideSolids(x, y, r) {
-  for (const s of solids) {
-    const cx = clamp(x, s.x, s.x + s.w), cy = clamp(y, s.y, s.y + s.h);
-    const dx = x - cx, dy = y - cy;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < r * r) {
-      const d = Math.sqrt(d2) || 0.01;
-      x = cx + (dx / d) * r; y = cy + (dy / d) * r;
+  for (let ty = Math.floor((y - r) / TILE); ty <= Math.floor((y + r) / TILE); ty++) {
+    for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) {
+      if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue;
+      const i = ty * MAP_W + tx;
+      if (solidGrid[i]) [x, y] = pushOut(x, y, r, { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE });
+      for (const s of propGrid[i]) [x, y] = pushOut(x, y, r, s);
     }
   }
   return { x, y };
+}
+
+const inRock = (x, y) => {
+  const i = tileAt(x, y);
+  return !!solidGrid[i] || propGrid[i].some(s => x > s.x && x < s.x + s.w && y > s.y && y < s.y + s.h);
+};
+
+// flow field: BFS tile distances from the player, refreshed a few times a
+// second; zombies walk downhill on it, so they round corners and buildings
+let flowDist = null, flowQ = null, flowT = 0;
+function updateFlow() {
+  const N = MAP_W * MAP_H;
+  if (!flowDist || flowDist.length !== N) { flowDist = new Int16Array(N); flowQ = new Int32Array(N); }
+  flowDist.fill(-1);
+  const s = tileAt(player.x, player.y);
+  let head = 0, tail = 0;
+  flowDist[s] = 0; flowQ[tail++] = s;
+  while (head < tail) {
+    const i = flowQ[head++], x = i % MAP_W, d = flowDist[i] + 1;
+    if (x > 0 && walkGrid[i - 1] && flowDist[i - 1] < 0) { flowDist[i - 1] = d; flowQ[tail++] = i - 1; }
+    if (x < MAP_W - 1 && walkGrid[i + 1] && flowDist[i + 1] < 0) { flowDist[i + 1] = d; flowQ[tail++] = i + 1; }
+    if (i >= MAP_W && walkGrid[i - MAP_W] && flowDist[i - MAP_W] < 0) { flowDist[i - MAP_W] = d; flowQ[tail++] = i - MAP_W; }
+    if (i + MAP_W < N && walkGrid[i + MAP_W] && flowDist[i + MAP_W] < 0) { flowDist[i + MAP_W] = d; flowQ[tail++] = i + MAP_W; }
+  }
+}
+const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+function flowDir(e) {
+  const i = tileAt(e.x, e.y), d0 = flowDist[i];
+  if (d0 === 0 || d0 === 1) return null; // close enough to charge straight in
+  const x = i % MAP_W, y = Math.floor(i / MAP_W);
+  let bestJ = -1, bd = d0 < 0 ? 1e9 : d0;
+  for (const [dx, dy] of DIRS8) {
+    const nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+    const j = ny * MAP_W + nx;
+    if (flowDist[j] < 0 || flowDist[j] >= bd) continue;
+    if (dx && dy && (!walkGrid[i + dx] || !walkGrid[i + dy * MAP_W])) continue; // no corner cutting
+    bd = flowDist[j]; bestJ = j;
+  }
+  if (bestJ < 0) return null;
+  return { x: (bestJ % MAP_W) * TILE + 8 - e.x, y: Math.floor(bestJ / MAP_W) * TILE + 8 - e.y };
 }
 
 // ------------------------------------------------------------------ state --
@@ -604,18 +824,19 @@ function newRun(weaponId) {
   const stats = baseStats(weaponId);
   CLASSES[G.cls].mods(stats);
   player = {
-    x: WORLD_W / 2, y: WORLD_H / 2, r: 6, hp: stats.maxHp, level: 1, xp: 0,
+    x: startPos.x, y: startPos.y, r: 6, hp: stats.maxHp, level: 1, xp: 0,
     stats, banked: 0,
     facing: 1, moving: false, animT: 0,
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: 0, reloadT: 0, recoil: 0, lastShot: -9, akimboSide: 1,
   };
   player.ammo = clipSize();
+  flowT = 0;
   enemies = []; gems = []; coins = []; flasks = []; bolts = []; bullets = []; grenades = []; firePatches = []; bossRings = []; fx = []; texts = [];
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
   G.sayQ = []; G.kingSeen = false; G.saidLowHp = false;
-  say("The dead dragged the King into this cave…", 1.2);
+  say("The dead dragged the King into this city…", 1.2);
   say("I will find him. Locked and loaded.", 4.2);
   startWave(1);
   G.state = "play";
@@ -714,25 +935,24 @@ function startWave(w) {
 }
 
 function spawnPointFor() {
-  const blocked = (x, y) => solids.some(s => x > s.x - 6 && x < s.x + s.w + 6 && y > s.y - 6 && y < s.y + s.h + 6);
-  // the horde climbs out of the spawn pits
-  for (let i = 0; i < 40; i++) {
-    const pit = pick(spawnPits);
-    const a = rnd(0, Math.PI * 2), r = rnd(4, 26);
-    const x = pit.x + Math.cos(a) * r, y = pit.y + Math.sin(a) * r * 0.7;
-    if (dist({ x, y }, player) > 90 && !blocked(x, y)) return { x, y };
+  // the dead pour out of manholes and doorways just beyond the edge of sight
+  const near = spawnSpots.filter(s => { const d = dist(s, player); return d > 170 && d < 380; });
+  const pool = near.length ? near : spawnSpots.filter(s => dist(s, player) > 120);
+  if (pool.length) {
+    const s = pick(pool);
+    return { x: s.x + rnd(-4, 4), y: s.y + rnd(-3, 3) };
   }
-  // fallback: an edge point clear of rock
-  for (let i = 0; i < 40; i++) {
-    const x = rnd(TILE * 3, WORLD_W - TILE * 3), y = rnd(TILE * 3, WORLD_H - TILE * 3);
-    if (dist({ x, y }, player) > 120 && !blocked(x, y)) return { x, y };
+  for (let i = 0; i < 60; i++) { // fallback: any open tile at a fair distance
+    const a = rnd(0, Math.PI * 2), r = rnd(200, 340);
+    const x = player.x + Math.cos(a) * r, y = player.y + Math.sin(a) * r;
+    if (x > 0 && y > 0 && x < WORLD_W && y < WORLD_H && walkGrid[tileAt(x, y)]) return { x, y };
   }
-  return { x: WORLD_W / 2 + 80, y: TILE * 4 };
+  return { x: player.x + 200, y: player.y };
 }
 
 function spawnEnemy(type, at) {
   const t = E_TYPES[type];
-  const p = at || spawnPointFor();
+  const p = at && !inRock(at.x, at.y) ? at : spawnPointFor(); // summons must not land inside a building
   const mult = 1 + 0.20 * (G.wave - 1);
   enemies.push({
     type, ...p, r: t.r, anim: t.anim, dirAnim: t.dirAnim, dir: "d", scale: t.scale,
@@ -1016,7 +1236,6 @@ function explode(x, y, r, dmg, crit) {
   }
 }
 
-const inRock = (x, y) => solids.some(s => x > s.x && x < s.x + s.w && y > s.y && y < s.y + s.h);
 // distance from point p to segment a->b: fast bullets travel 10-30px per
 // frame, so hits are tested along the whole step, not just its end
 function segDist(ax, ay, bx, by, px, py) {
@@ -1121,7 +1340,9 @@ function updatePlay(dt) {
     }
   }
 
-  // -- spawning
+  // -- pathing + spawning
+  flowT -= dt;
+  if (flowT <= 0) { flowT = 0.25; updateFlow(); }
   spawnTimer += dt;
   while (spawnQueue.length && spawnQueue[0].at <= spawnTimer) {
     spawnEnemy(spawnQueue.shift().type);
@@ -1197,6 +1418,10 @@ function updatePlay(dt) {
         beep(180, 0.5, "sine", 0.09, 240);
         for (let i = 0; i < 4; i++) spawnEnemy("wraith", { x: e.x + rnd(-38, 38), y: e.y + rnd(-30, 30) });
       }
+    }
+    if (!(e.ranged && dToP < 140)) { // walk the flow field around buildings and wrecks
+      const f = flowDir(e);
+      if (f) { tx = f.x; ty = f.y; }
     }
     const tl = Math.hypot(tx, ty) || 1;
     let dirX = tx / tl, dirY = ty / tl;
@@ -1299,7 +1524,7 @@ function updatePlay(dt) {
       G.kingSeen = true;
       beep(110, 0.5, "sine", 0.06, -40);
       say("No… my King… they got to him.");
-      say("…then this cave becomes their grave.", 3.4);
+      say("…then this city becomes their grave.", 3.4);
     }
   }
 
@@ -1385,17 +1610,6 @@ function renderWorld() {
   ctx.translate(-Math.round(cx), -Math.round(cy));
   ctx.drawImage(floorCanvas, 0, 0);
 
-  // glowing mushrooms + torches (flickering, so drawn live)
-  for (const m of mushrooms) drawSprite(animFrame(ANIM.mushroom, G.t + m.t, 3), m.x, m.y);
-  for (const t of torches) drawSprite(animFrame(ANIM.torch, G.t + t.t, 6), t.x, t.y);
-  // the hanged king on the east wall
-  if (kingPos) {
-    ctx.fillStyle = "rgba(110,20,26,0.75)"; // blood pool
-    ctx.beginPath();
-    ctx.ellipse(kingPos.x, kingPos.y + 3, 8, 3, 0, 0, Math.PI * 2);
-    ctx.fill();
-    drawSprite(animFrame(ANIM.king, G.t, 1.4), kingPos.x, kingPos.y);
-  }
 
   // burning ground under everything
   for (const f of firePatches) {
@@ -1434,6 +1648,10 @@ function renderWorld() {
 
   // entities, y-sorted
   const drawables = [];
+  for (const p of props) {
+    if (p.x < cx - 40 || p.x > cx + VW + 40 || p.y < cy - 8 || p.y > cy + VH + 50) continue;
+    drawables.push({ y: p.y, draw: () => drawProp(p) });
+  }
   for (const e of enemies) drawables.push({ y: e.y, draw: () => drawEnemy(e) });
   drawables.push({ y: player.y, draw: drawPlayer });
   drawables.sort((a, b) => a.y - b.y);
@@ -1530,6 +1748,26 @@ function renderWorld() {
   renderDarkness(cx, cy);
 }
 
+function drawProp(p) {
+  if (p.gallows) { // the hanged King: a post, a crossbeam, a rope
+    ctx.fillStyle = "#141018"; ctx.fillRect(p.x - 15, p.y - 38, 4, 41); ctx.fillRect(p.x - 15, p.y - 38, 18, 3);
+    ctx.fillStyle = "#5a4232"; ctx.fillRect(p.x - 14, p.y - 37, 2, 39); ctx.fillRect(p.x - 14, p.y - 37, 16, 1);
+    drawSprite(animFrame(ANIM.king, G.t, 1.4), p.x, p.y);
+    return;
+  }
+  drawSprite(p.img, p.x, p.y, p.flip);
+  if (p.fire) drawFlames(p.x, p.y - p.fireY, p.t);
+}
+
+function drawFlames(x, y, seed) {
+  for (let i = 0; i < 7; i++) {
+    const k = Math.sin(G.t * 13 + i * 2.3 + seed) * 0.5 + 0.5;
+    const fx2 = x + ((i * 5) % 9) - 4, h = 2 + Math.round(k * (i % 3 === 1 ? 6 : 4));
+    ctx.fillStyle = i % 3 === 0 ? "#ffe08a" : i % 3 === 1 ? "#ff8a2a" : "#d8441c";
+    ctx.fillRect(Math.round(fx2), Math.round(y - h), 2, h);
+  }
+}
+
 const PLAYER_SCALE = 1.3;
 function drawPlayer() {
   const list = ANIM[CLASSES[G.cls].anim + (player.moving ? "_run" : "_idle")];
@@ -1588,7 +1826,7 @@ function renderDarkness(cx, cy) {
   const dc = darkCanvas.getContext("2d");
   dc.globalCompositeOperation = "source-over";
   dc.clearRect(0, 0, VW, VH);
-  dc.fillStyle = "rgba(6,4,14,0.42)";
+  dc.fillStyle = "rgba(6,4,18,0.55)"; // a dead city has no power: night is dark
   dc.fillRect(0, 0, VW, VH);
   dc.globalCompositeOperation = "destination-out";
   const punch = (x, y, r, a) => {
@@ -1609,8 +1847,11 @@ function renderDarkness(cx, cy) {
     else if (p.kind === "flash") punch(p.x, p.y, p.r * 2, 0.9 * p.life / p.max);
   }
   for (const ring of bossRings) punch(ring.x, ring.y, ring.r + 14, 0.5);
-  for (const m of mushrooms) punch(m.x, m.y - 3, 22, 0.55);
-  for (const t of torches) punch(t.x, t.y - 6, 46 + Math.sin(G.t * 9 + t.t) * 4, 0.8);
+  for (const l of lamps) {
+    if (l.flicker && Math.sin(G.t * 23 + l.t) + Math.sin(G.t * 7.3 + l.t * 2) > 1.1) continue; // dying bulb
+    punch(l.x, l.y, 62, 0.8);
+  }
+  for (const p of props) if (p.fire) punch(p.x, p.y - p.fireY, 48 + Math.sin(G.t * 9 + p.t) * 4, 0.85);
   if (kingPos) punch(kingPos.x, kingPos.y - 12, 36, 0.5);
   let n = 0;
   for (const e of enemies) { if (n++ > 50) break; punch(e.x, e.y, e.big ? 40 : 24, 0.45); }
@@ -1671,6 +1912,8 @@ function renderHUD() {
   ctx.fillRect(pauseBtnRect.x + 6, pauseBtnRect.y + 5, 3, 8);
   ctx.fillRect(pauseBtnRect.x + 11, pauseBtnRect.y + 5, 3, 8);
 
+  renderMinimap();
+
   // armorer weapon inventory (dev mode only)
   if (DEV.on && G.cls === "armorer") renderInventoryBar();
   else invRects = [];
@@ -1697,6 +1940,24 @@ function renderHUD() {
 }
 
 let pauseBtnRect = null, fsPauseRect = null, invRects = [];
+
+// city map, bottom-left: you (white), the horde (red), the King (gold)
+function renderMinimap() {
+  const s = 0.6, w = Math.round(MAP_W * s), h = Math.round(MAP_H * s);
+  const x0 = 6, y0 = VH - h - 6;
+  ctx.globalAlpha = 0.8;
+  ctx.drawImage(miniCanvas, x0, y0, w, h);
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#57506b"; ctx.lineWidth = 1; ctx.strokeRect(x0 - 0.5, y0 - 0.5, w + 1, h + 1);
+  const dot = (x, y, col, r) => { ctx.fillStyle = col; ctx.fillRect(Math.round(x0 + x / TILE * s - r / 2), Math.round(y0 + y / TILE * s - r / 2), r, r); };
+  let n = 0;
+  for (const e of enemies) { if (n++ > 150) break; if (e.warmup <= 0) dot(e.x, e.y, e.bossBar ? "#ff4d4d" : "#c0303a", e.bossBar ? 3 : 1); }
+  if (kingPos && Math.floor(G.t * 2) % 2) dot(kingPos.x, kingPos.y, "#ffd166", 3);
+  dot(player.x, player.y, "#ffffff", 2);
+  // the viewport
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.strokeRect(Math.round(x0 + G.cam.x / TILE * s) + 0.5, Math.round(y0 + G.cam.y / TILE * s) + 0.5, Math.round(VW / TILE * s), Math.round(VH / TILE * s));
+}
 
 // armorer-only (dev mode): switch to any gun mid-run, stats rebuilt from
 // scratch (base weapon -> class mods -> owned cards re-applied)
@@ -2283,12 +2544,25 @@ function renderSelect(t) {
 // title / end screens -------------------------------------------------------
 let titleFloor = null;
 function renderTitle(t) {
-  // cave sky: vertical gradient + faint stalactite silhouettes
+  // night sky over a dead skyline (deterministic: no flicker between frames)
   const sky = ctx.createLinearGradient(0, 0, 0, VH);
   sky.addColorStop(0, "#070510"); sky.addColorStop(0.6, "#120c1c"); sky.addColorStop(1, "#1c1224");
   ctx.fillStyle = sky; ctx.fillRect(0, 0, VW, VH);
+  for (let bx = -6, k = 0; bx < VW; k++) {
+    const w = 26 + (k * 37) % 30, h = 50 + (k * 53) % 70, top = VH - 62 - h;
+    ctx.fillStyle = k % 2 ? "#0d0a14" : "#110d1a";
+    ctx.fillRect(bx, top, w, h);
+    for (let wy = top + 6; wy < VH - 70; wy += 9) {
+      for (let wx = bx + 4; wx < bx + w - 5; wx += 7) {
+        const lit = ((wx * 7 + wy * 13 + k) % 23) === 0;
+        ctx.fillStyle = lit ? "rgba(230,190,90,0.55)" : "rgba(40,36,56,0.6)";
+        ctx.fillRect(wx, wy, 3, 4);
+      }
+    }
+    bx += w + 2;
+  }
 
-  // warm glow from the campfire corner
+  // warm glow from the burning-barrel corner
   const g = ctx.createRadialGradient(64, 216, 6, 64, 216, 190);
   g.addColorStop(0, "rgba(252,150,50,0.30)"); g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
@@ -2326,11 +2600,11 @@ function renderTitle(t) {
     titleFloor.width = VW; titleFloor.height = 40;
     const fc = titleFloor.getContext("2d");
     fc.imageSmoothingEnabled = false;
-    const names = ["floor_1", "floor_1", "floor_2", "floor_3", "floor_7"];
     for (let i = 0; i <= VW / TILE; i++) {
-      fc.drawImage(IMG[names[(i * 7) % names.length]], i * TILE, 8);
-      fc.drawImage(IMG[names[(i * 3 + 1) % names.length]], i * TILE, 24);
+      fc.drawImage(IMG[`city_walk_${i % 5 === 0 ? 1 : 0}`], i * TILE, 8);
+      fc.drawImage(IMG[`city_road_${(i * 7) % 3}`], i * TILE, 24);
     }
+    fc.fillStyle = "rgba(30,28,34,0.9)"; fc.fillRect(0, 23, VW, 1); // curb
     fc.fillStyle = "rgba(6,4,14,0.45)"; fc.fillRect(0, 0, VW, 40);
   }
   ctx.drawImage(titleFloor, 0, VH - 62);
@@ -2389,7 +2663,7 @@ function renderEnd(victory, t) {
     ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff";
     ctx.fillText("“It is done. Rest now, my King.”", VW / 2, 132);
     ctx.font = "8px monospace"; ctx.fillStyle = "#ffd166";
-    ctx.fillText("the cave is quiet. the barrels are hot.", VW / 2, 168);
+    ctx.fillText("the city is quiet. the barrels are hot.", VW / 2, 168);
     ctx.fillText("[E] keep blasting (endless)   [ENTER] new run", VW / 2, 196);
   } else {
     drawSprite("skull", VW / 2, 152, false, 2);
