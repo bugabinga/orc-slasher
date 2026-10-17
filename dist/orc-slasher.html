@@ -1824,7 +1824,8 @@ const walkRow = ty => { const r = rowOf(ty); return (r > 0 && ty === roadY[r - 1
 
 function buildMap() {
   SEED = (Math.random() * 4294967296) >>> 0;
-  cellCache.clear(); chunkCache.clear(); chunkDecals.clear();
+  for (const ch of chunkCache.values()) chunkPool.push(ch.canvas);
+  cellCache.clear(); chunkCache.clear(); chunkDecals.clear(); chunkStale.length = 0;
   WORLD.props.clear(); WORLD.tiles.clear(); WORLD.cellTiles.clear();
   radarReady = false;
   const R = mulberry(hash3(1, 2, 3));
@@ -1854,9 +1855,9 @@ function getCell(ci, cj) {
   c.stamp = mapStamp;
   return c;
 }
-function evict(cache, n) {
+function evict(cache, n, drop) {
   const old = [...cache.entries()].sort((a, b) => a[1].stamp - b[1].stamp);
-  for (let i = 0; i < n && i < old.length; i++) cache.delete(old[i][0]);
+  for (let i = 0; i < n && i < old.length; i++) { if (drop) drop(old[i][1]); cache.delete(old[i][0]); }
 }
 const cellAt = (tx, ty) => getCell(colOf(tx), rowOf(ty));
 const oob = (tx, ty) => tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H;
@@ -2093,24 +2094,55 @@ function cellsIn(x0, y0, x1, y1, out = []) {
   return out;
 }
 
-// ---- floor: painted per chunk on first sight, evicted when long unseen
+// ---- floor: painted per chunk on first sight, evicted when long unseen.
+// Canvases are pooled (each is a 256 KB backing store). chunkWork() spends
+// one paint per frame on stale chunks or on the ring just outside the view,
+// so walking rarely paints a visible chunk synchronously.
+const chunkPool = [], chunkStale = [];
+const dropChunk = ch => { chunkPool.push(ch.canvas); };
 function getChunk(kx, ky) {
   const key = kx * 65536 + ky;
   let ch = chunkCache.get(key);
   if (!ch) {
-    if (chunkCache.size >= CHUNK_CAP) evict(chunkCache, CHUNK_CAP / 4);
-    ch = { canvas: paintChunk(kx, ky), stamp: 0 };
+    if (chunkCache.size >= CHUNK_CAP) evict(chunkCache, CHUNK_CAP / 4, dropChunk);
+    ch = { canvas: paintChunk(kx, ky, chunkPool.pop()), stamp: 0, stale: false };
     chunkCache.set(key, ch);
   }
   ch.stamp = mapStamp;
   return ch.canvas;
 }
+// keep showing the old floor until chunkWork repaints it (a frame or two)
+function staleChunk(kx, ky) {
+  const key = kx * 65536 + ky, ch = chunkCache.get(key);
+  if (ch && !ch.stale) { ch.stale = true; chunkStale.push(key); }
+}
+function chunkWork(cx, cy, vx, vy) {
+  while (chunkStale.length) {
+    const key = chunkStale.shift(), ch = chunkCache.get(key);
+    if (!ch || !ch.stale) continue;
+    const kx = Math.floor(key / 65536), ky = key - kx * 65536, old = ch.canvas;
+    ch.canvas = paintChunk(kx, ky, chunkPool.pop());
+    ch.stale = false;
+    chunkPool.push(old);
+    return;
+  }
+  const S = CHUNK * TILE;
+  // ring one chunk past the view, leaning toward where the player is heading
+  const x0 = Math.floor((cx - (vx < 0 ? S : S / 4)) / S), x1 = Math.floor((cx + VW + (vx > 0 ? S : S / 4)) / S);
+  const y0 = Math.floor((cy - (vy < 0 ? S : S / 4)) / S), y1 = Math.floor((cy + VH + (vy > 0 ? S : S / 4)) / S);
+  for (let ky = y0; ky <= y1; ky++) for (let kx = x0; kx <= x1; kx++) {
+    if (kx < 0 || ky < 0 || kx * CHUNK >= MAP_W || ky * CHUNK >= MAP_H) continue;
+    if (!chunkCache.has(kx * 65536 + ky)) { getChunk(kx, ky); return; }
+  }
+}
 
 const WIN_TILES = ["win0", "win0", "win0", "win0", "win2", "win2", "win3", "win3", "win1"];
-function paintChunk(kx, ky) {
-  const S = CHUNK * TILE, cv = document.createElement("canvas");
-  cv.width = S; cv.height = S;
+function paintChunk(kx, ky, cv) {
+  const S = CHUNK * TILE;
+  if (!cv) { cv = document.createElement("canvas"); cv.width = S; cv.height = S; }
   const fc = cv.getContext("2d");
+  fc.setTransform(1, 0, 0, 1, 0, 0); fc.globalAlpha = 1; fc.globalCompositeOperation = "source-over";
+  fc.clearRect(0, 0, S, S);
   fc.imageSmoothingEnabled = false;
   const tx0 = kx * CHUNK, ty0 = ky * CHUNK;
   const put = (name, x, y, fb) => {
@@ -2237,6 +2269,8 @@ const inRock = (x, y) => solidAt(x, y) !== 0;
 // round corners and buildings. Outside the window they walk straight.
 const FLOW_N = 80;
 const flowDist = new Int32Array(FLOW_N * FLOW_N), flowQ = new Int32Array(FLOW_N * FLOW_N), flowWalk = new Uint8Array(FLOW_N * FLOW_N);
+// downhill neighbour per tile, baked once per BFS so zombies only look it up (-1: none)
+const flowNext = new Int32Array(FLOW_N * FLOW_N).fill(-1);
 let flowT = 0, flowX0 = 0, flowY0 = 0;
 function updateFlow() {
   const N = FLOW_N;
@@ -2254,25 +2288,34 @@ function updateFlow() {
     if (i >= N && flowWalk[i - N] && flowDist[i - N] < 0) { flowDist[i - N] = d; flowQ[tail++] = i - N; }
     if (i + N < N * N && flowWalk[i + N] && flowDist[i + N] < 0) { flowDist[i + N] = d; flowQ[tail++] = i + N; }
   }
+  for (let i = 0; i < N * N; i++) flowNext[i] = downhill(i);
 }
-const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-function flowDir(e) {
-  const N = FLOW_N;
-  const x = Math.floor(e.x / TILE) - flowX0, y = Math.floor(e.y / TILE) - flowY0;
-  if (x < 0 || y < 0 || x >= N || y >= N) return null;
-  const i = y * N + x, d0 = flowDist[i];
-  if (d0 === 0 || d0 === 1) return null; // close enough to charge straight in
+const DIR_X = [1, -1, 0, 0, 1, 1, -1, -1], DIR_Y = [0, 0, 1, -1, 1, -1, 1, -1];
+function downhill(i) {
+  const N = FLOW_N, x = i % N, y = (i - x) / N, d0 = flowDist[i];
+  if (d0 === 0 || d0 === 1) return -1; // close enough to charge straight in
   let bestJ = -1, bd = d0 < 0 ? 1e9 : d0;
-  for (const [dx, dy] of DIRS8) {
-    const nx = x + dx, ny = y + dy;
+  for (let k = 0; k < 8; k++) {
+    const dx = DIR_X[k], dy = DIR_Y[k], nx = x + dx, ny = y + dy;
     if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
     const j = ny * N + nx;
     if (flowDist[j] < 0 || flowDist[j] >= bd) continue;
     if (dx && dy && (!flowWalk[i + dx] || !flowWalk[i + dy * N])) continue; // no corner cutting
     bd = flowDist[j]; bestJ = j;
   }
-  if (bestJ < 0) return null;
-  return { x: (flowX0 + bestJ % N) * TILE + 8 - e.x, y: (flowY0 + Math.floor(bestJ / N)) * TILE + 8 - e.y };
+  return bestJ;
+}
+// writes the step toward the next tile centre into FLOW_V; false = walk straight
+const FLOW_V = { x: 0, y: 0 };
+function flowDir(e) {
+  const N = FLOW_N;
+  const x = Math.floor(e.x / TILE) - flowX0, y = Math.floor(e.y / TILE) - flowY0;
+  if (x < 0 || y < 0 || x >= N || y >= N) return false;
+  const j = flowNext[y * N + x];
+  if (j < 0) return false;
+  FLOW_V.x = (flowX0 + j % N) * TILE + 8 - e.x;
+  FLOW_V.y = (flowY0 + ((j / N) | 0)) * TILE + 8 - e.y;
+  return true;
 }
 
 // ------------------------------------------------------------------ state --
@@ -3377,8 +3420,7 @@ function sysZombies(dt) {
       }
     }
     if (!(z.ranged && dToP < 140)) { // walk the flow field around buildings and wrecks
-      const f = flowDir(z);
-      if (f) { tx = f.x; ty = f.y; }
+      if (flowDir(z)) { tx = FLOW_V.x; ty = FLOW_V.y; }
     }
     const tl = Math.hypot(tx, ty) || 1;
     let dirX = tx / tl, dirY = ty / tl;
@@ -3418,9 +3460,9 @@ function sysZombies(dt) {
     for (let k = 0; k < near.length; k++) {
       const b = near[k];
       if (b.e <= ea) continue; // each pair once
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const d = Math.hypot(dx, dy), min = a.r + b.r;
-      if (d > 0 && d < min) {
+      const dx = b.x - a.x, dy = b.y - a.y, min = a.r + b.r, d2 = dx * dx + dy * dy;
+      if (d2 > 0 && d2 < min * min) {
+        const d = Math.sqrt(d2);
         const push = (min - d) / 2 / d;
         a.x -= dx * push; a.y -= dy * push;
         b.x += dx * push; b.y += dy * push;
@@ -3739,6 +3781,7 @@ function renderWorld() {
   ctx.save();
   ctx.translate(-Math.round(cx), -Math.round(cy));
   drawFloor(cx, cy);
+  chunkWork(cx, cy, player.vx, player.vy);
   const vx0 = cx - 40, vx1 = cx + VW + 40, vy0 = cy - 20, vy1 = cy + VH + 60;
 
   // burning ground
@@ -4014,22 +4057,27 @@ function collectLights(cx, cy) {
 }
 
 let darkCanvas = null, darkCtx = null;
+// 2D fallback night: the light map is soft, so it is built at 1/4 resolution
+// (16x fewer pixels to composite) and smoothly upscaled
+const DARK_S = 4, DARK_W = Math.ceil(VW / DARK_S), DARK_H = Math.ceil(VH / DARK_S);
 function renderDarkness(cx, cy) {
-  if (!darkCanvas) { darkCanvas = document.createElement("canvas"); darkCanvas.width = VW; darkCanvas.height = VH; darkCtx = darkCanvas.getContext("2d"); }
+  if (!darkCanvas) { darkCanvas = document.createElement("canvas"); darkCanvas.width = DARK_W; darkCanvas.height = DARK_H; darkCtx = darkCanvas.getContext("2d"); }
   const dc = darkCtx;
   dc.globalCompositeOperation = "source-over";
   dc.globalAlpha = 1;
-  dc.clearRect(0, 0, VW, VH);
+  dc.clearRect(0, 0, DARK_W, DARK_H);
   dc.fillStyle = "rgba(6,4,18,0.55)"; // a dead city has no power: night is dark
-  dc.fillRect(0, 0, VW, VH);
+  dc.fillRect(0, 0, DARK_W, DARK_H);
   dc.globalCompositeOperation = "destination-out";
   for (let i = 0; i < lightCount; i++) {
-    const k = i * 7, r = LIGHTS[k + 2];
+    const k = i * 7, r = LIGHTS[k + 2] / DARK_S;
     dc.globalAlpha = Math.min(1, LIGHTS[k + 3]);
-    dc.drawImage(LIGHT_BLOB, Math.round(LIGHTS[k] - cx - r), Math.round(LIGHTS[k + 1] - cy - r), Math.round(r * 2), Math.round(r * 2));
+    dc.drawImage(LIGHT_BLOB, (LIGHTS[k] - cx) / DARK_S - r, (LIGHTS[k + 1] - cy) / DARK_S - r, r * 2, r * 2);
   }
   dc.globalAlpha = 1;
-  ctx.drawImage(darkCanvas, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(darkCanvas, 0, 0, DARK_W * DARK_S, DARK_H * DARK_S);
+  ctx.imageSmoothingEnabled = false;
 }
 
 // ------------------------------------------------------------ destruction --
@@ -4221,6 +4269,7 @@ function destroyTile(tx, ty, b) {
   for (const s of c.pg[i] || EMPTY) if (!s.dead) c.walk[i] = 0;
   const key = ty * MAP_W + tx;
   WORLD.tiles.set(key, -1);
+  radarDirty = true;
   const ck = c.ci * 65536 + c.cj;
   let lst = WORLD.cellTiles.get(ck);
   if (!lst) { lst = []; WORLD.cellTiles.set(ck, lst); }
@@ -4231,7 +4280,7 @@ function destroyTile(tx, ty, b) {
   dust(tx * TILE + 8, ty * TILE + 12, 6, 7);
   // repaint the chunks that can see this tile (facades above and below change)
   const S = CHUNK;
-  for (let yy = ty - 2; yy <= ty + 1; yy++) for (let xx = tx - 1; xx <= tx + 1; xx++) chunkCache.delete(Math.floor(xx / S) * 65536 + Math.floor(yy / S));
+  for (let yy = ty - 2; yy <= ty + 1; yy++) for (let xx = tx - 1; xx <= tx + 1; xx++) staleChunk(Math.floor(xx / S), Math.floor(yy / S));
 }
 
 // what is at a world point: 0 nothing, 1 a building, or the live prop rect
@@ -4277,11 +4326,14 @@ function rgbOf(col) {
 }
 // glyph cell: (bold ? 6 : 5) + 2 wide, 10 high (1px outline all round)
 let fontNoOutline = false; // logo fills are tinted afterwards: no outline wanted
-function fontAtlas(col, bold) {
-  const outline = !fontNoOutline;
-  const key = col + (bold ? "|b" : "|n") + (outline ? "" : "|f");
-  let a = fontAtlases.get(key);
+// mode: 0 outlined, 1 no outline, 2 flat (no outline, one tone); +3 when bold
+function fontAtlas(col, bold, flat = false) {
+  const mode = (flat ? 2 : fontNoOutline ? 1 : 0) + (bold ? 3 : 0);
+  let byCol = fontAtlases.get(col);
+  if (!byCol) fontAtlases.set(col, byCol = [null, null, null, null, null, null]);
+  let a = byCol[mode];
   if (a) return a;
+  const outline = !fontNoOutline && !flat;
   if (!glyphMask && !loadGlyphs()) return null;
   const gw = bold ? 6 : 5, cw = gw + 2, ch = 10, n = FONT_CHARS.length;
   const c = document.createElement("canvas");
@@ -4299,7 +4351,7 @@ function fontAtlas(col, bold) {
     for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
       const o = (y * c.width + i * cw + x) * 4;
       if (fill[y * cw + x]) { // two-tone: the lower half a shade darker
-        const k = y >= 5 ? 0.78 : 1;
+        const k = y >= 5 && !flat ? 0.78 : 1;
         d[o] = r * k; d[o + 1] = gg * k; d[o + 2] = b * k; d[o + 3] = 255;
       } else {
         let edge = false;
@@ -4312,8 +4364,8 @@ function fontAtlas(col, bold) {
     }
   }
   g.putImageData(img, 0, 0);
-  a = { canvas: c, cw, adv: gw + 1 };
-  fontAtlases.set(key, a);
+  a = { canvas: c, cw, adv: gw + 1, strings: new Map() };
+  byCol[mode] = a;
   return a;
 }
 let fontKey = "", fontSize = 8, fontBold = false, fontItalic = false;
@@ -4325,39 +4377,57 @@ function parseFont() {
   fontBold = /bold/.test(fontKey) || fontSize >= 9;
   fontItalic = /italic/.test(fontKey);
 }
-const fontScale = () => fontSize >= 13 ? Math.max(2, Math.floor(fontSize / 7)) : 1;
+const scaleOf = size => size >= 13 ? Math.max(2, Math.floor(size / 7)) : 1;
 function fchars(str) {
   let out = "";
   for (const ch of String(str)) out += FONT_IDX.has(ch) ? ch : (FONT_SUB[ch] || "?");
   return out;
 }
-function fmeasure(str) {
-  parseFont();
-  return fchars(str).length * (fontBold ? 7 : 6) * fontScale();
+// size given: measure as ftx would draw it (bold); else from ctx.font
+function fmeasure(str, size) {
+  if (size === undefined) { parseFont(); return fchars(str).length * (fontBold ? 7 : 6) * scaleOf(fontSize); }
+  return fchars(str).length * 7 * scaleOf(size);
 }
-// draws like ftext(str, x, baselineY)
-function ftext(str, x, y) {
-  parseFont();
-  const s = fchars(str), sc = fontScale();
-  const col = typeof ctx.fillStyle === "string" ? ctx.fillStyle : "#ffffff";
-  const a = fontAtlas(col, fontBold);
-  if (!a) return;
-  const w = s.length * a.adv * sc;
-  let x0 = ctx.textAlign === "center" ? x - w / 2 : ctx.textAlign === "right" ? x - w : x;
-  x0 = Math.round(x0); const top = Math.round(y - 8 * sc);
-  if (fontItalic) { ctx.save(); ctx.transform(1, 0, -0.2, 1, (y) * 0.2, 0); }
+// Every string is baked once into its own small canvas per atlas (LRU), so
+// a line of text costs one drawImage instead of one per glyph
+const TEXT_CAP = 96;
+function textBitmap(a, str) {
+  const m = a.strings;
+  let e = m.get(str);
+  if (e) { m.delete(str); m.set(str, e); return e; } // refresh LRU position
+  const s = fchars(str), w = Math.max(1, (s.length - 1) * a.adv + a.cw);
+  let c, g;
+  if (m.size >= TEXT_CAP) { // recycle the least recently used canvas
+    const old = m.keys().next().value, o = m.get(old);
+    c = o.c; g = o.g; m.delete(old);
+    if (c.width !== w) c.width = w; else g.clearRect(0, 0, w, 10);
+  } else { c = document.createElement("canvas"); c.width = w; c.height = 10; g = c.getContext("2d"); }
   for (let i = 0; i < s.length; i++) {
     const gi = FONT_IDX.get(s[i]);
-    if (gi === 0) continue;
-    ctx.drawImage(a.canvas, gi * a.cw, 0, a.cw, 10, x0 + i * a.adv * sc - sc, top, a.cw * sc, 10 * sc);
+    if (gi !== 0) g.drawImage(a.canvas, gi * a.cw, 0, a.cw, 10, i * a.adv, 0, a.cw, 10);
   }
-  if (fontItalic) ctx.restore();
+  e = { c, g, w, n: s.length };
+  m.set(str, e);
+  return e;
 }
-// convenience: draw with an explicit style, restoring nothing (callers set ctx state freely)
+function drawText(a, str, x, y, sc, align, italic) {
+  const e = textBitmap(a, str);
+  const w = e.n * a.adv * sc;
+  const x0 = Math.round(align === "center" ? x - w / 2 : align === "right" ? x - w : x), top = Math.round(y - 8 * sc);
+  if (italic) { ctx.save(); ctx.transform(1, 0, -0.2, 1, y * 0.2, 0); }
+  ctx.drawImage(e.c, 0, 0, e.w, 10, x0 - sc, top, e.w * sc, 10 * sc);
+  if (italic) ctx.restore();
+}
+// draws like ftext(str, x, baselineY), styled by ctx.font / fillStyle / textAlign
+function ftext(str, x, y) {
+  parseFont();
+  const a = fontAtlas(typeof ctx.fillStyle === "string" ? ctx.fillStyle : "#ffffff", fontBold);
+  if (a) drawText(a, str, x, y, scaleOf(fontSize), ctx.textAlign, fontItalic);
+}
+// explicit style; leaves ctx.font / fillStyle / textAlign untouched
 function ftx(str, x, y, size, col, align = "left", italic = false) {
-  ctx.font = `${italic ? "italic " : ""}bold ${size}px monospace`;
-  ctx.fillStyle = col; ctx.textAlign = align;
-  ftext(str, x, y);
+  const a = fontAtlas(col, true);
+  if (a) drawText(a, str, x, y, scaleOf(size), align, italic);
 }
 
 // ------------------------------------------------------------------- HUD ---
@@ -4390,7 +4460,7 @@ function renderHUD() {
     bar(40, 20, 70, 3, p, "#ffd166");
   } else {
     ftx(String(player.ammo), 40, 23, 14, low && Math.floor(t * 6) % 2 ? "#ff4d4d" : "#ffffff");
-    ftx("/" + clip, 42 + fmeasure(String(player.ammo)), 23, 8, "#8f84a8");
+    ftx("/" + clip, 42 + fmeasure(String(player.ammo), 14), 23, 8, "#8f84a8");
   }
   // health: segmented bar with a white "lag" that drains after a hit
   const hx = 8, hy = 30, hw = 104, hh = 7;
@@ -4496,15 +4566,10 @@ function renderPager() {
   ftextFlat(shown + (Math.floor(pg.t * 3) % 2 ? "_" : ""), x + 5, y + 12);
   ctx.globalAlpha = 1;
 }
-// LCD text: no outline, so it reads like the pager screen
+// LCD text: no outline, one tone, so it reads like the pager screen
 function ftextFlat(str, x, y) {
-  const s = fchars(str);
-  if (!glyphMask && !loadGlyphs()) return;
-  ctx.fillStyle = "#26301a";
-  for (let i = 0; i < s.length; i++) {
-    const gi = FONT_IDX.get(s[i]);
-    for (let yy = 0; yy < 8; yy++) for (let xx = 0; xx < 5; xx++) if (glyphMask[gi * 40 + yy * 5 + xx]) ctx.fillRect(x + i * 6 + xx, y - 8 + yy, 1, 1);
-  }
+  const a = fontAtlas("#26301a", false, true);
+  if (a) drawText(a, str, x, y, 1, "left", false);
 }
 
 // a big yellow arrow orbiting the hero, pointing at the King (GTA 2 style)
@@ -4564,7 +4629,8 @@ const RADAR_COL = ["#2b2f3c", "#858ea0", "#3f4452", "#353946", "#2c4a35", "#8a74
 // two sample canvases: the front one is drawn while the back one refills a
 // slice of rows per frame, so a resample never costs a whole frame
 let radarCanvas = null, radarBack = null, radarDisc = null, radarBezel = null;
-let radarT = 0, radarOX = 0, radarOY = 0, radarHead = 0;
+let radarDirty = true, radarOX = 0, radarOY = 0, radarHead = 0;
+let radarCanvasA = null, radarCtxA = null, radarCtxB = null;
 let radarJob = -1, radarJX = 0, radarJY = 0, radarReady = false;
 const RADAR_ROWS = 22; // rows resampled per frame
 function pixelDisc(c, cx, cy, r, col) {
@@ -4577,6 +4643,7 @@ function pixelDisc(c, cx, cy, r, col) {
 function initRadar() {
   radarCanvas = document.createElement("canvas"); radarCanvas.width = radarCanvas.height = RADAR_S;
   radarBack = document.createElement("canvas"); radarBack.width = radarBack.height = RADAR_S;
+  radarCanvasA = radarCanvas; radarCtxA = radarCanvas.getContext("2d"); radarCtxB = radarBack.getContext("2d");
   radarDisc = new Path2D();
   for (let y = -RADAR_R; y < RADAR_R; y++) {
     const w = Math.round(Math.sqrt(RADAR_R * RADAR_R - (y + 0.5) * (y + 0.5)));
@@ -4610,14 +4677,14 @@ function resampleRows(c, ox, oy, y0, y1) {
 }
 function stepRadar(ptx, pty, dx, dy) {
   if (radarJob < 0) {
-    if ((radarT -= 1 / 60) > 0 && Math.abs(dx) < RADAR_PAD - 4 && Math.abs(dy) < RADAR_PAD - 4) return;
-    radarT = 0.5; // also picks up fresh rubble
+    if (!radarDirty && Math.abs(dx) < RADAR_PAD - 4 && Math.abs(dy) < RADAR_PAD - 4) return;
+    radarDirty = false;
     radarJob = 0;
     radarJX = Math.floor(ptx) - (RADAR_R + RADAR_PAD) * RADAR_TPP;
     radarJY = Math.floor(pty) - (RADAR_R + RADAR_PAD) * RADAR_TPP;
   }
   const y1 = Math.min(RADAR_S, radarJob + RADAR_ROWS);
-  resampleRows(radarBack.getContext("2d"), radarJX, radarJY, radarJob, y1);
+  resampleRows(radarBack === radarCanvasA ? radarCtxA : radarCtxB, radarJX, radarJY, radarJob, y1);
   radarJob = y1;
   if (radarJob >= RADAR_S) {
     const t = radarCanvas; radarCanvas = radarBack; radarBack = t;
@@ -4630,7 +4697,7 @@ function renderMinimap() {
   // radar pixels between the sample origin and where the view wants to be
   if (!radarReady) { // new map: fill synchronously once
     radarReady = true;
-    radarJob = -1; radarT = 0; stepRadar(ptx, pty, 0, 0);
+    radarJob = -1; radarDirty = true; stepRadar(ptx, pty, 0, 0);
     while (radarJob >= 0) stepRadar(ptx, pty, 0, 0);
   }
   // radar pixels between the sample origin and where the view wants to be
@@ -5245,7 +5312,7 @@ function buildLogo() {
   const word = (s, x, y, size, outline, fill, grad) => {
     ctx.font = `bold ${size}px monospace`; ctx.textAlign = "center";
     // outline: the word in black, stamped around in a ring
-    const sc = fontScale(), o = Math.max(2, sc >> 1);
+    const sc = scaleOf(size), o = Math.max(2, sc >> 1);
     for (let dy = -o; dy <= o; dy += o) for (let dx = -o; dx <= o; dx += o) { ctx.fillStyle = outline; ftext(s, x + dx, y + dy); }
     // fill, tinted with the gradient through a scratch layer
     const l = document.createElement("canvas");
@@ -5971,6 +6038,7 @@ canvas.addEventListener("pointermove", e => {
 
 // ------------------------------------------------------------------- loop --
 let last = performance.now();
+let lastCursor = "";
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -5989,7 +6057,9 @@ function frame(now) {
     return;
   }
   updateFX(dt);
-  canvas.style.cursor = G.state === "play" && !G.paused && mouse.seen ? "none" : "default";
+  const cur = G.state === "play" && !G.paused && mouse.seen ? "none" : "default";
+  if (cur !== lastCursor) canvas.style.cursor = lastCursor = cur; // style writes can dirty layout
+
 
   if (G.state === "title") renderTitle(now / 1000);
   else if (G.state === "credits") renderCredits(now / 1000);

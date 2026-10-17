@@ -8,7 +8,8 @@ Player-facing docs live in README.md; this file is the technical map.
 allocation, in-place array compaction, spatial hash, cached sprites, how
 to drive WebGL). Measure every perf change with `node tools/bench.mjs`
 (real rAF loop, not a synchronous sim; `--throttle 4`, `--fx off`,
-`--gl force`) and put before/after numbers in the
+`--gl force`) and find the cause with `node tools/profile.mjs --scene horde --ops`
+(CPU self-time + canvas calls per frame by call site) and put before/after numbers in the
 commit message.
 
 ## Repo layout
@@ -97,7 +98,9 @@ src/game.js` before building.
   to a zombie within 18px), else auto-aim
 - **Text** — pixel font `font_atlas` (5×8). `ftext` is a drop-in for
   `fillText` (reads `ctx.font`/`fillStyle`/`textAlign`); `ftx(str,x,y,size,
-  col,align,italic)`, `fmeasure`. Never use `ctx.fillText`
+  col,align,italic)` takes explicit style and leaves ctx untouched;
+  `fmeasure(str, size?)`. Strings are baked once per colour atlas
+  (`textBitmap`, LRU) — one drawImage per string. Never use `ctx.fillText`
 - **HUD** (`renderHUD`) — weapon/ammo panel, segmented HP with lag, `$`
   score counter, multiplier, threat stars, pager (`G.pager`, LCD typewriter),
   `banner()` headlines (newest replaces older), King arrow, radar
@@ -121,11 +124,14 @@ src/game.js` before building.
   deterministically (tile types, buildings, props, lamps, spawns,
   manholes, per-tile prop rects) and `getCell` caches it (LRU,
   `CELL_CAP`). Query tiles via `tileType` / `walkAt` / `rectsAt`; never
-  loop over the whole map. The floor is painted per 16×16-tile chunk on
-  first sight (`getChunk`/`paintChunk`, LRU `CHUNK_CAP`); all floor
+  loop over the whole map. The floor is painted per 16×16-tile chunk
+  (`getChunk`/`paintChunk`, LRU `CHUNK_CAP`, canvases pooled); `chunkWork`
+  paints ≤1 chunk/frame — `staleChunk`-marked ones first, then the ring
+  outside the view; all floor
   randomness is `hash3`, so repaints match. Props, lamps and spawns come
   from `cellsIn(rect)` around the camera/player. Flow field: BFS in an
-  80×80-tile window (`updateFlow` every 0.25s); zombies beyond 720px are
+  80×80-tile window (`updateFlow` every 0.25s, which also bakes the
+  downhill step per tile into `flowNext`); zombies beyond 720px are
   recalled to a nearer manhole. HUD radar samples tiles around the player
   and points at the King. Bump `mapStamp` once per frame (LRU clock)
 - **States**: title → credits (optional) → cls → select → play ⇄ campfire

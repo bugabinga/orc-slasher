@@ -120,6 +120,30 @@ From MDN "WebGL best practices":
   bench before "fixing" them.
 - Light falloff matters more than light count: `(1-d/r)²` left lamps
   nearly invisible; a smoothstep falloff gives readable pools.
+- **Find the caller of raster cost with `node tools/profile.mjs --ops`.**
+  The CPU profile only says "drawImage" / "(program)"; the `--ops` table
+  counts every canvas call per frame by call site. Game JS was ~3% of the
+  frame; canvas calls and their deferred raster were the rest.
+- **Count calls, not just pixels.** The pixel font drew one `drawImage` per
+  glyph and the pager one `fillRect` per *pixel* (~500 calls/frame). Each
+  string is now baked once into an LRU'd canvas per colour atlas
+  (`textBitmap`): one call per string. Never draw text per glyph.
+- **Soft things at low resolution.** The 2D darkness overlay (`destination-out`
+  light blobs, full res) cost 1.3 ms/frame in one `drawImage` — the deferred
+  raster of the blobs lands on the blit. Built at ¼ res and smoothly
+  upscaled: 0.28 ms, same look.
+- **Bake per-tile answers once, look them up per entity.** `flowDir` searched
+  8 neighbours per zombie per frame and allocated a result; the downhill
+  neighbour is now baked into `flowNext` right after each BFS (4×/s).
+- **Pool big canvases, prefetch, repaint late.** A floor chunk is a 256 KB
+  backing store: evicted ones go to `chunkPool`. `chunkWork` paints at most
+  one chunk per frame — stale ones first (blasts mark chunks stale instead
+  of deleting them; the old floor shows for a frame or two), then the ring
+  just outside the view. Walking now paints 0 chunks on the visible path.
+- Don't write DOM style every frame (`canvas.style.cursor`): write on change.
+- Before → after this pass (p50 ms, 1× | 4× throttle): walk 2.4 → 1.4 |
+  13.9 → 5.8, horde 3.9 → 2.4 | 22 → 12.5, boom 4.0 → 1.9 | 21 → 9.9;
+  4× fps walk 43 → 59, horde 30 → 39, boom 30 → 44.
 
 ## Sources
 
