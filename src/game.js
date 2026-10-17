@@ -627,7 +627,7 @@ function genCell(ci, cj) {
     const id = cell.buildings.length, bwid = bx1 - bx0 + 1;
     const doors = new Set([bx0 + ri(1, Math.max(1, bwid - 2))]);
     if (bwid >= 7 && R() < 0.5) doors.add(bx0 + ri(1, bwid - 2));
-    cell.buildings.push({ wall: rp(WALL_STYLES), roof: ri(0, 2), doors });
+    cell.buildings.push({ wall: rp(WALL_STYLES), roof: ri(0, 3), doors });
     for (let ty = by0; ty <= by1; ty++) for (let tx = bx0; tx <= bx1; tx++) { T[L(tx, ty)] = T_BLD; bid[L(tx, ty)] = id; }
     for (const d of doors) if (by1 + 1 <= y1 && T[L(d, by1 + 1)] !== T_BLD) cell.spawns.push({ x: d * TILE + 8, y: (by1 + 1) * TILE + 8 });
   }
@@ -889,13 +889,25 @@ function paintChunk(kx, ky, cv) {
         if (below1) put(b.doors.has(tx) ? `city_wall_${b.wall}_door${h % 3 === 0 ? 1 : 0}` : `city_wall_${b.wall}_${WIN_TILES[h % WIN_TILES.length]}`, x, y, "#5a4c48");
         else if (below2) put(`city_wall_${b.wall}_${WIN_TILES[(h >> 3) % WIN_TILES.length]}`, x, y, "#5a4c48");
         else {
-          put(`city_roof_${b.roof}`, x, y, "#403e44");
-          // parapet: dark edge where the roof meets another building or the sky
-          fc.fillStyle = "#1a161e";
-          if (buildingAt(tx, ty - 1) !== b) fc.fillRect(x, y, TILE, 2);
-          if (buildingAt(tx - 1, ty) !== b) fc.fillRect(x, y, 1, TILE);
-          if (buildingAt(tx + 1, ty) !== b) fc.fillRect(x + TILE - 1, y, 1, TILE);
-          if (h % 17 === 0 && b !== EDGE_BLD) put(h % 2 ? "city_ac" : "city_vent", x + 2, y + 3);
+          put(`city_roof_${b.roof}`, x, y, "#7a7468");
+          // raised parapet where the roof ends: dark outline, a lit rim, its
+          // shadow on the roof; the front lip caps the facade below
+          const up = buildingAt(tx, ty - 1) !== b, lf = buildingAt(tx - 1, ty) !== b, rt = buildingAt(tx + 1, ty) !== b;
+          const dn = tileType(tx, ty + 3) !== T_BLD;
+          fc.fillStyle = "#16121a";
+          if (up) fc.fillRect(x, y, TILE, 1);
+          if (lf) fc.fillRect(x, y, 1, TILE);
+          if (rt) fc.fillRect(x + 15, y, 1, TILE);
+          if (dn) fc.fillRect(x, y + 15, TILE, 1);
+          fc.fillStyle = "rgba(255,240,220,0.3)";
+          if (up) fc.fillRect(x, y + 1, TILE, 2);
+          if (lf) fc.fillRect(x + 1, y, 2, TILE);
+          if (rt) fc.fillRect(x + 13, y, 2, TILE);
+          if (dn) fc.fillRect(x, y + 13, TILE, 2);
+          fc.fillStyle = "rgba(0,0,0,0.28)";
+          if (up) fc.fillRect(x + (lf ? 3 : 0), y + 3, TILE - (lf ? 3 : 0) - (rt ? 3 : 0), 1);
+          if (lf) fc.fillRect(x + 3, y + (up ? 3 : 0), 1, TILE - (up ? 3 : 0) - (dn ? 3 : 0));
+          if (b !== EDGE_BLD && !up && !lf && !rt && !dn && h % 9 === 0) put(["city_ac", "city_vent", "city_skylight"][(h >> 4) % 3], x + 2, y + 3);
         }
         continue;
       }
@@ -906,7 +918,9 @@ function paintChunk(kx, ky, cv) {
         if (tileType(tx, ty + 1) === T_ROAD) fc.fillRect(x, y + 15, TILE, 1);
         if (tileType(tx, ty - 1) === T_ROAD) fc.fillRect(x, y, TILE, 1);
       }
-      if (tileType(tx, ty - 1) === T_BLD) { fc.fillStyle = "rgba(0,0,0,0.35)"; fc.fillRect(x, y, TILE, 3); } // facade shadow
+      fc.fillStyle = "rgba(0,0,0,0.35)"; // buildings cast shadow down and to the right
+      if (tileType(tx, ty - 1) === T_BLD) fc.fillRect(x, y, TILE, 3);
+      if (tileType(tx - 1, ty) === T_BLD) fc.fillRect(x, y, 4, TILE);
       if (walkAt(tx, ty)) { // decals
         const r = (h >>> 8) % 1000;
         if (r < 15) put("city_blood", x, y);

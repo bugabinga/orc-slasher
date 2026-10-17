@@ -95,9 +95,30 @@ for i in range(2):
     save(t, f"plaza_{i}")
 
 # ------------------------------------------------------------- buildings ----
-ROOFS = [(64, 62, 68), (78, 60, 52), (58, 66, 76)]
-for i, c in enumerate(ROOFS):
-    save(texture(c, 4, [(tuple(v - 14 for v in c), 14), (tuple(v + 14 for v in c), 6)]), f"roof_{i}")
+# the first roof set is still drawn (and dropped) so the shared random stream,
+# and with it every sprite below, stays exactly as it was
+for c in [(64, 62, 68), (78, 60, 52), (58, 66, 76)]:
+    texture(c, 4, [(tuple(v - 14 for v in c), 14), (tuple(v + 14 for v in c), 6)])
+_main_rng, R = R, random.Random(4242)
+# roofs read as roofs from above: brighter than asphalt, each its own material
+t = texture((128, 122, 110), 10, [((96, 90, 82), 30), ((158, 152, 140), 20)])  # tar and gravel
+save(t, "roof_0")
+t = texture((142, 84, 62), 6, [((112, 70, 52), 10)])  # ribbed metal
+for x in range(0, 16, 4):
+    rect(t, x, 0, x, 15, (108, 62, 46)); rect(t, x + 1, 0, x + 1, 15, (170, 106, 80))
+save(t, "roof_1")
+t = texture((96, 118, 116), 5, [((120, 140, 136), 8)])  # membrane panels
+rect(t, 0, 0, 15, 0, (70, 88, 86)); rect(t, 0, 8, 15, 8, (70, 88, 86)); rect(t, 0, 0, 0, 15, (70, 88, 86))
+save(t, "roof_2")
+t = texture((152, 138, 126), 6, [((128, 116, 106), 14), ((112, 100, 92), 6)])  # big poured slabs, stained
+rect(t, 0, 0, 15, 0, (110, 98, 90)); rect(t, 0, 0, 0, 15, (110, 98, 90))
+rect(t, 9, 5, 12, 7, (126, 114, 104)); rect(t, 4, 10, 6, 12, (130, 118, 108))
+crack(t, (110, 98, 90), 6)
+save(t, "roof_3")
+t = new(10, 8)  # skylight
+rect(t, 0, 0, 9, 7, K); rect(t, 1, 1, 8, 6, (70, 110, 140)); rect(t, 2, 2, 3, 3, (170, 210, 230)); rect(t, 4, 1, 4, 6, (40, 60, 80))
+save(t, "skylight")
+R = _main_rng
 
 WALLS = {"brick": (124, 60, 48), "concrete": (116, 116, 122), "beige": (150, 132, 104)}
 for name, c in WALLS.items():

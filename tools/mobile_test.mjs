@@ -153,6 +153,9 @@ const route = await G_(() => {
     const sx = gx - G.cam.x, sy = gy - 6 - G.cam.y;
     if (sx < 30 || sx > VW - 30 || sy < 70 || sy > VH - 20) continue;
     if (!heroWalk(Math.floor(gx / TILE), Math.floor(gy / TILE)) || clearRun(player.x, player.y, gx, gy) || !planPath(gx, gy)) continue;
+    let nearProp = false; // a tap next to a prop locks fire on it instead of walking
+    for (const c of cellsIn(gx - 30, gy - 30, gx + 30, gy + 30)) for (const pr of c.props) if (!pr.gone && Math.hypot(pr.x - gx, pr.y - 8 - (gy - 6)) < 20) nearProp = true;
+    if (nearProp) continue;
     return [sx, sy, gx, gy, PATH.n];
   }
   return null;
