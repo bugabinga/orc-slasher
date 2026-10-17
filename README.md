@@ -15,21 +15,31 @@ offline, on desktop and phone.
 
 ## How to play
 
-- **Move:** WASD / arrow keys, or drag anywhere on a touchscreen
+**Desktop**
+
+- **Move:** WASD / arrow keys
 - **Shoot:** automatic — your hero aims at the nearest zombie, empties the
   clip, reloads. Or **hold the mouse** to aim and fire yourself (it snaps
   onto a zombie right under the crosshair)
-- **Dash:** Space / Shift (touch: the round button, bottom-right) — a burst
-  of speed with invincibility frames, 1.6s cooldown. Dash past a zombie
-  for a **CLOSE CALL**
+- **Dash:** Space / Shift — a burst of speed with invincibility frames,
+  1.6s cooldown. Dash past a zombie for a **CLOSE CALL**
+- **Menus:** click things, or press the number keys
+- **Pause:** P / Esc, or the ⏸ button top-right in combat
+- **Fullscreen:** the ⛶ button in the menu corner (or press F)
+
+**Phone** (landscape; the first tap goes fullscreen) — no virtual sticks:
+
+- **Hold** anywhere: your hero runs toward your finger
+- **Tap** the street: walk there · **tap a zombie, car or barrel**: lock
+  your fire onto it (red brackets) — shoot that car next to the horde
+- **Flick**: dash that way · **a second finger**: dash right now. The ring
+  at your feet fills while the dash recharges
+- Shooting stays automatic; hits and explosions buzz (Android)
 
 **Score:** every kill pays `$`. Chain kills within 3 seconds for a combo —
 every 6 kills raises the multiplier (up to ×10), gibs pay ×1.5 and kills
 by exploding cars/barrels ×2. Taking a hit breaks the chain. Easy to
 play, hard to master.
-- **Menus:** click things, or press the number keys
-- **Pause:** P / Esc, or the ⏸ button top-right in combat
-- **Fullscreen:** the ⛶ button in the menu corner (or press F)
 
 Every HP and damage number is big: 10 damage reads as **33**, 60 HP reads
 as **198**.

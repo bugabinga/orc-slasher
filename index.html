@@ -2,22 +2,43 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0910">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>ZOMBIE BLASTER</title>
 <style>
   html, body { margin: 0; height: 100%; background: #0b0910; overflow: hidden; }
-  body { display: flex; align-items: center; justify-content: center; }
+  body {
+    box-sizing: border-box; height: 100dvh;
+    /* keep the game clear of notches and rounded corners */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
   canvas {
+    display: block; width: 100%; height: 100%;
     image-rendering: pixelated;
     image-rendering: crisp-edges;
-    width: 100vw; height: 100vh;
     object-fit: contain;
     touch-action: none;
   }
+  #rotate {
+    display: none; position: fixed; inset: 0; z-index: 9; background: #0b0910;
+    flex-direction: column; align-items: center; justify-content: center; gap: 28px;
+    color: #ffd166; font: bold 20px/1.4 monospace; letter-spacing: 2px; text-align: center;
+  }
+  #rotate i {
+    width: 44px; height: 76px; border: 6px solid #e8dfc8; border-radius: 8px; box-sizing: border-box;
+    animation: turn 1.8s ease-in-out infinite;
+  }
+  #rotate small { color: #8f84a8; font-size: 13px; letter-spacing: 1px; }
+  @keyframes turn { 0%, 25% { transform: rotate(0); } 55%, 100% { transform: rotate(-90deg); } }
+  @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
 </style>
 </head>
 <body>
 <canvas id="game" width="480" height="270"></canvas>
+<div id="rotate"><i></i>TURN YOUR PHONE<small>Zombie Blaster plays in landscape</small></div>
 <script src="src/assets.js"></script>
 <script src="src/game.js"></script>
 </body>

@@ -141,6 +141,15 @@ From MDN "WebGL best practices":
   of deleting them; the old floor shows for a frame or two), then the ring
   just outside the view. Walking now paints 0 chunks on the visible path.
 - Don't write DOM style every frame (`canvas.style.cursor`): write on change.
+- **Never modify a big canvas you also draw from during play.** The first
+  atlas packed mirror/tint variants on demand into the 2048² page: each
+  change makes the browser snapshot the whole page (16 MB) on its next use
+  → p99 4 ms → 18 ms, 134 ms spikes at 4×. Mirrors are now packed at load;
+  the few tints made in play go on 512² pages. In general: static pages for
+  static art, small scratch pages for anything written later.
+- The sprite atlas is neutral on the CPU rasteriser (measured: same p50);
+  its win is GPU canvases batching draws from one texture, which this
+  headless setup can't measure.
 - Before → after this pass (p50 ms, 1× | 4× throttle): walk 2.4 → 1.4 |
   13.9 → 5.8, horde 3.9 → 2.4 | 22 → 12.5, boom 4.0 → 1.9 | 21 → 9.9;
   4× fps walk 43 → 59, horde 30 → 39, boom 30 → 44.

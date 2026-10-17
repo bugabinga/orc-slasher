@@ -136,7 +136,21 @@ src/game.js` before building.
   and points at the King. Bump `mapStamp` once per frame (LRU clock)
 - **States**: title → credits (optional) → cls → select → play ⇄ campfire
   → gameover/victory. All input goes through `handleKey` / `handleClick`
-- **Rendering**: the game draws 480×270 into two layers — `sceneCtx`
+- **View**: 270 rows; `VW` (a `let`) follows the screen's shape, 480–640
+  (`fitView`, on resize). Never cache anything sized by VW at load time —
+  rebuild it in `fitView` (FX targets via `fxTargets`, shaders get `uRes`/`RES`)
+- **Sprite atlas** (`buildAtlas`, first frame after load): every sprite +
+  its mirror image packed into 2048² pages; tinted copies go on 512² pages
+  during play. `im.atl` = slot. Draw sprites with `dimg(g, im, x, y, w?, h?)`
+  (or `dimgTop` for a cropped top), never `drawImage(IMG[..])` — plain
+  canvases fall through to drawImage
+- **Input**: keyboard (`handleKey`), mouse (hold = aim, `mouse`), touch
+  (`touch`: hold = run toward finger, tap = walk-to / `focusAt` lock-on,
+  flick or 2nd finger = `touchDash`; no on-screen sticks). `focus` is
+  honoured by auto-aim via `focusTarget`. `usingTouch` switches hint
+  texts and tap padding (`tapPad`); `buzz(ms)` = haptics. Portrait on a
+  phone shows the `#rotate` card (index.html CSS) and pauses
+- **Rendering**: the game draws VW×270 into two layers — `sceneCtx`
   (world) and `uiCtx` (HUD, damage numbers, overlays; never lit). `ctx`
   points at the current one; `frame()` switches it. Feet-anchored
   `drawSprite` (cached flipped / tinted copies, no `ctx.filter`), y-sorted
@@ -167,7 +181,9 @@ src/game.js` before building.
 Playwright smoke tests against the dist build (Chromium is preinstalled):
 
 ```
-node -e "..."  # see scratchpad pattern: launch chromium with
+node tools/mobile_test.mjs [--shots dir]   # phone: taps, hold/tap/flick/2-finger,
+                                           # focus fire, wide view, portrait card
+node -e "..."  # ad-hoc: launch chromium with
                # executablePath /opt/pw-browsers/chromium, --no-sandbox,
                # goto file://.../dist/orc-slasher.html, drive via
                # page.keyboard / page.evaluate on the game's globals
