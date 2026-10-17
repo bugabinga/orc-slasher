@@ -31,7 +31,8 @@ offline, on desktop and phone.
 text is drawn bigger on small screens) — no virtual sticks:
 
 - **Hold** anywhere: your hero runs toward your finger
-- **Tap** the street: walk there · **tap a zombie, car or barrel**: lock
+- **Tap** the street: walk there — your hero finds the way around buildings
+  and wrecks (dotted route) · **tap a zombie, car or barrel**: lock
   your fire onto it (red brackets) — shoot that car next to the horde
 - **Flick**: dash that way · **a second finger**: dash right now. The ring
   at your feet fills while the dash recharges

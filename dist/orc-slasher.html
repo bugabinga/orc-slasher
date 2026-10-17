@@ -1793,6 +1793,7 @@ canvas.addEventListener("pointerdown", e => {
   }
   if (!playing) return;
   touch.id = e.pointerId; touch.x = touch.sx = p.x; touch.y = touch.sy = p.y;
+  PATH.tx = -1e9; PATH.n = 0;
   touch.t0 = performance.now(); touch.far = 0;
 });
 canvas.addEventListener("pointermove", e => {
@@ -1814,6 +1815,7 @@ const endTouch = e => {
     const wx = touch.sx + G.cam.x, wy = touch.sy + G.cam.y;
     if (focusAt(wx, wy)) { buzz(8); SFX.card(); learn(LEARN_AIM); return; }
     touch.goal = true; touch.gx = wx; touch.gy = wy; touch.goalT = 0;
+    PATH.tx = -1e9; PATH.t = 0;
   }
 };
 window.addEventListener("pointerup", endTouch);
@@ -2420,6 +2422,122 @@ function updateFlow() {
   for (let i = 0; i < N * N; i++) flowNext[i] = downhill(i);
 }
 const DIR_X = [1, -1, 0, 0, 1, 1, -1, -1], DIR_Y = [0, 0, 1, -1, 1, -1, 1, -1];
+
+// hero pathing (tap-to-walk / hold-to-run): A* over walkable tiles in a
+// window around the hero, 8-way without corner cutting, then string-pulled
+// so the hero runs straight wherever a hero-wide line is clear. Typed arrays
+// with a generation stamp: nothing is allocated or cleared per search.
+const AS_R = 40, AS_N = AS_R * 2 + 1, AS_NODES = AS_N * AS_N;
+const asG = new Float32Array(AS_NODES), asF = new Float32Array(AS_NODES), asFrom = new Int32Array(AS_NODES);
+const asSeen = new Uint32Array(AS_NODES), asShut = new Uint32Array(AS_NODES), asWalk = new Uint8Array(AS_NODES), asWalkGen = new Uint32Array(AS_NODES);
+const asHeap = new Int32Array(AS_NODES * 4);
+let asGen = 0, asX0 = 0, asY0 = 0;
+const PATH = { n: 0, i: 0, x: new Float32Array(64), y: new Float32Array(64), tx: -1e9, ty: -1e9, t: 0, stuck: 0, lastD: 0 };
+// stricter than walkAt: lamp posts, cones and barricades don't close a tile
+// for zombies (they steer around them) but the hero's route must avoid them
+function heroWalk(tx, ty) {
+  if (!walkAt(tx, ty)) return 0;
+  for (const r of rectsAt(tx, ty)) if (!r.dead) return 0;
+  return 1;
+}
+function asWalkable(i) {
+  if (asWalkGen[i] !== asGen) { asWalkGen[i] = asGen; asWalk[i] = heroWalk(asX0 + i % AS_N, asY0 + ((i / AS_N) | 0)); }
+  return asWalk[i];
+}
+function heapPush(n, i) {
+  let k = n;
+  asHeap[k] = i;
+  while (k > 0) { const p = (k - 1) >> 1; if (asF[asHeap[p]] <= asF[i]) break; asHeap[k] = asHeap[p]; asHeap[p] = i; k = p; }
+}
+function heapPop(n) { // n = size before the pop
+  const top = asHeap[0], last = asHeap[n - 1];
+  let k = 0;
+  n--;
+  asHeap[0] = last;
+  for (;;) {
+    const l = k * 2 + 1, r = l + 1;
+    let m = k;
+    if (l < n && asF[asHeap[l]] < asF[asHeap[m]]) m = l;
+    if (r < n && asF[asHeap[r]] < asF[asHeap[m]]) m = r;
+    if (m === k) break;
+    const t = asHeap[k]; asHeap[k] = asHeap[m]; asHeap[m] = t; k = m;
+  }
+  return top;
+}
+// is a hero-wide straight run from a to b clear? (world px, feet)
+function clearRun(ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy), steps = Math.ceil(d / 4);
+  const nx = d ? -dy / d * 6 : 0, ny = d ? dx / d * 6 : 0;
+  for (let k = 0; k <= steps; k++) {
+    const x = ax + dx * k / steps, y = ay + dy * k / steps;
+    if (!heroWalk(Math.floor(x / TILE), Math.floor(y / TILE)) ||
+        !heroWalk(Math.floor((x + nx) / TILE), Math.floor((y + ny) / TILE)) ||
+        !heroWalk(Math.floor((x - nx) / TILE), Math.floor((y - ny) / TILE))) return false;
+  }
+  return true;
+}
+// plan from the hero's feet to (gx, gy); fills PATH, false = walk straight
+function planPath(gx, gy) {
+  PATH.n = 0; PATH.i = 0; PATH.stuck = 0; PATH.lastD = 1e9;
+  const sx = player.x, sy = player.y;
+  if (clearRun(sx, sy, gx, gy)) { PATH.x[0] = gx; PATH.y[0] = gy; PATH.n = 1; return true; }
+  asGen++;
+  const stx = Math.floor(sx / TILE), sty = Math.floor(sy / TILE);
+  asX0 = stx - AS_R; asY0 = sty - AS_R;
+  let gtx = clamp(Math.floor(gx / TILE) - asX0, 0, AS_N - 1), gty = clamp(Math.floor(gy / TILE) - asY0, 0, AS_N - 1);
+  // tapped into a wall or a car: aim for the nearest open tile instead
+  if (!asWalkable(gty * AS_N + gtx)) {
+    let best = -1, bd = 1e9;
+    for (let r = 1; r <= 3 && best < 0; r++) for (let oy = -r; oy <= r; oy++) for (let ox = -r; ox <= r; ox++) {
+      const x = gtx + ox, y = gty + oy;
+      if (x < 0 || y < 0 || x >= AS_N || y >= AS_N || !asWalkable(y * AS_N + x)) continue;
+      const d = ox * ox + oy * oy;
+      if (d < bd) { bd = d; best = y * AS_N + x; }
+    }
+    if (best < 0) return false;
+    gtx = best % AS_N; gty = (best / AS_N) | 0;
+  }
+  const start = AS_R * AS_N + AS_R, goal = gty * AS_N + gtx;
+  const h = i => { const ax = Math.abs(i % AS_N - gtx), ay = Math.abs(((i / AS_N) | 0) - gty); return ax + ay - 0.586 * Math.min(ax, ay); };
+  asG[start] = 0; asF[start] = h(start); asFrom[start] = -1; asSeen[start] = asGen;
+  let n = 0;
+  heapPush(n++, start);
+  let found = false, budget = 3000; // an unreachable target can't cost a long frame
+  while (n > 0 && budget-- > 0) {
+    const cur = heapPop(n--);
+    if (asShut[cur] === asGen) continue;
+    asShut[cur] = asGen;
+    if (cur === goal) { found = true; break; }
+    const cx = cur % AS_N, cy = (cur / AS_N) | 0;
+    for (let k = 0; k < 8; k++) {
+      const ox = DIR_X[k], oy = DIR_Y[k], x = cx + ox, y = cy + oy;
+      if (x < 0 || y < 0 || x >= AS_N || y >= AS_N) continue;
+      const j = y * AS_N + x;
+      if (asShut[j] === asGen || !asWalkable(j)) continue;
+      if (ox && oy && (!asWalkable(cy * AS_N + x) || !asWalkable(y * AS_N + cx))) continue; // no corner cutting
+      const g = asG[cur] + (ox && oy ? 1.414 : 1);
+      if (asSeen[j] === asGen && g >= asG[j]) continue;
+      asSeen[j] = asGen; asG[j] = g; asF[j] = g + h(j); asFrom[j] = cur;
+      if (n < asHeap.length) heapPush(n++, j);
+    }
+  }
+  if (!found) return false;
+  // tile centres goal -> start (the goal itself if it is open ground)
+  const cx = asTmpX, cy = asTmpY;
+  let m = 0;
+  for (let i = goal; i !== -1; i = asFrom[i]) { cx[m] = (asX0 + i % AS_N) * TILE + 8; cy[m] = (asY0 + ((i / AS_N) | 0)) * TILE + 8; m++; }
+  if (heroWalk(Math.floor(gx / TILE), Math.floor(gy / TILE))) { cx[0] = gx; cy[0] = gy; }
+  // string-pull: from each anchor run on while the next centre is in clear view
+  let ax = sx, ay = sy, k = m - 1;
+  while (k > 0 && PATH.n < PATH.x.length) {
+    let j = k - 1;
+    while (j > 0 && clearRun(ax, ay, cx[j - 1], cy[j - 1])) j--;
+    PATH.x[PATH.n] = cx[j]; PATH.y[PATH.n] = cy[j]; PATH.n++;
+    ax = cx[j]; ay = cy[j]; k = j;
+  }
+  return PATH.n > 0;
+}
+const asTmpX = new Float32Array(AS_NODES), asTmpY = new Float32Array(AS_NODES);
 function downhill(i) {
   const N = FLOW_N, x = i % N, y = (i - x) / N, d0 = flowDist[i];
   if (d0 === 0 || d0 === 1) return -1; // close enough to charge straight in
@@ -3755,12 +3873,31 @@ function updatePlayer(dt) {
   let my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
   // touch: run toward the held finger, or walk to the last tapped spot.
   // Full speed beyond ~34px, easing to a stop on the spot (no overshoot)
+  // Routes around buildings and wrecks via planPath; re-plans when the target
+  // crosses into another tile (at most 5x/s) or progress stalls
   if (touch.id !== -1 || touch.goal) {
-    const tx = touch.id !== -1 ? touch.x + G.cam.x : touch.gx, ty = touch.id !== -1 ? touch.y + G.cam.y : touch.gy;
-    const dx = tx - player.x, dy = ty - (player.y - 6), d = Math.hypot(dx, dy);
-    if (d > 5) { const m = Math.min(1, (d - 4) / 30); mx = dx / d * m; my = dy / d * m; }
-    else touch.goal = false;
-    if (touch.goal && (touch.goalT += dt) > 4) touch.goal = false; // stuck on a wall: give up
+    const gx = touch.id !== -1 ? touch.x + G.cam.x : touch.gx;
+    const gy = (touch.id !== -1 ? touch.y + G.cam.y : touch.gy) + 6; // the finger marks the body, the path the feet
+    PATH.t -= dt;
+    const moved = Math.floor(gx / TILE) !== Math.floor(PATH.tx / TILE) || Math.floor(gy / TILE) !== Math.floor(PATH.ty / TILE);
+    if ((moved && PATH.t <= 0) || PATH.stuck > 0.6) {
+      PATH.tx = gx; PATH.ty = gy; PATH.t = 0.2;
+      if (!planPath(gx, gy)) PATH.n = 0;
+    }
+    const ends = PATH.n && heroWalk(Math.floor(gx / TILE), Math.floor(gy / TILE));
+    if (ends) { PATH.x[PATH.n - 1] = gx; PATH.y[PATH.n - 1] = gy; } // the last leg follows the finger exactly
+    while (PATH.i < PATH.n - 1 && Math.hypot(PATH.x[PATH.i] - player.x, PATH.y[PATH.i] - player.y) < 7) { PATH.i++; PATH.lastD = 1e9; }
+    const last = !PATH.n || PATH.i === PATH.n - 1;
+    const wx = PATH.n ? PATH.x[PATH.i] : gx, wy = PATH.n ? PATH.y[PATH.i] : gy;
+    const dx = wx - player.x, dy = wy - player.y, d = Math.hypot(dx, dy);
+    // a walk-to ends on the spot, or when it stalls close to it (a prop in the way)
+    const done = last && (d <= 5 || (d < 16 && PATH.stuck > 0.3));
+    if (!done) {
+      const m = last ? Math.min(1, (d - 4) / 30) : 1;
+      mx = dx / d * m; my = dy / d * m;
+      if (d < PATH.lastD - 0.4) { PATH.lastD = d; PATH.stuck = 0; } else PATH.stuck += dt;
+    } else touch.goal = false;
+    if (touch.goal && ((touch.goalT += dt) > 8 || (!PATH.n && PATH.stuck > 0.6))) touch.goal = false; // no route: give up
   }
   const ml = Math.hypot(mx, my);
   player.moving = ml > 0.1;
@@ -4733,6 +4870,15 @@ function renderTouchMarks() {
     }
   }
   if (!usingTouch) return;
+  if ((touch.goal || touch.id !== -1) && PATH.n > 1) { // GPS-style dotted route, crawling forward
+    ctx.fillStyle = "rgba(120,255,220,0.85)";
+    let ax = player.x, ay = player.y, phase = (t * 24) % 6;
+    for (let i = PATH.i; i < PATH.n; i++) {
+      const bx = PATH.x[i], by = PATH.y[i], d = Math.hypot(bx - ax, by - ay);
+      for (let s = phase; s < d; s += 6) ctx.fillRect(Math.round(ax + (bx - ax) * s / d - ox), Math.round(ay + (by - ay) * s / d - oy), 1, 1);
+      phase = (phase - d % 6 + 6) % 6; ax = bx; ay = by;
+    }
+  }
   if (touch.goal) {
     const x = Math.round(touch.gx - ox), y = Math.round(touch.gy - oy), k = Math.floor(t * 8) % 4;
     ctx.fillStyle = "rgba(120,255,220,0.8)";

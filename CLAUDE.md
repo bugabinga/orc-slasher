@@ -150,7 +150,10 @@ src/game.js` before building.
   canvases fall through to drawImage
 - **Input**: keyboard (`handleKey`), mouse (hold = aim, `mouse`), touch
   (`touch`: hold = run toward finger, tap = walk-to / `focusAt` lock-on,
-  flick or 2nd finger = `touchDash`; no on-screen sticks). `focus` is
+  flick or 2nd finger = `touchDash`; no on-screen sticks). Hero routes via
+  `planPath` (A* in an 81×81-tile window, 3000-node budget, string-pulled
+  with `clearRun`; `heroWalk` = `walkAt` minus tiles holding any prop rect)
+  into `PATH`; re-plans when the target changes tile or progress stalls. `focus` is
   honoured by auto-aim via `focusTarget`. `usingTouch` switches hint
   texts and tap padding (`tapPad`); `buzz(ms)` = haptics. Portrait on a
   phone shows the `#rotate` card (index.html CSS) and pauses

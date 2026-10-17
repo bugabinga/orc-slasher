@@ -145,6 +145,25 @@ if (car) {
   check("focused car takes fire", await G_(hp0 => !focus.p || focus.p.hp < hp0 || focus.p.state !== 0, car[2]), await G_(() => focus.p ? `hp ${focus.p.hp.toFixed(0)} d ${Math.round(Math.hypot(focus.p.x - player.x, focus.p.y - player.y))} range ${player.stats.range} ammo ${player.ammo}` : "gone"));
 } else check("tap car -> focused", true, "skipped: no car in range on this map");
 
+// tap behind a building: the hero routes around it (A*), no wall-hugging
+const route = await G_(() => {
+  clearZombies(); focus.z = focus.p = null; touch.goal = false;
+  for (let k = 0; k < 600; k++) {
+    const a = Math.random() * 6.28, d = 70 + Math.random() * 110, gx = player.x + Math.cos(a) * d, gy = player.y + Math.sin(a) * d;
+    const sx = gx - G.cam.x, sy = gy - 6 - G.cam.y;
+    if (sx < 30 || sx > VW - 30 || sy < 70 || sy > VH - 20) continue;
+    if (!heroWalk(Math.floor(gx / TILE), Math.floor(gy / TILE)) || clearRun(player.x, player.y, gx, gy) || !planPath(gx, gy)) continue;
+    return [sx, sy, gx, gy, PATH.n];
+  }
+  return null;
+});
+if (route) {
+  await tap(route[0], route[1]);
+  check("tap behind a wall -> route planned", await G_(() => touch.goal && PATH.n >= 2), await G_(() => PATH.n + " waypoints"));
+  await wait(4500);
+  check("…and the hero gets there", await G_(([gx, gy]) => !touch.goal && Math.hypot(player.x - gx, player.y - gy) < 24, [route[2], route[3]]), await G_(([gx, gy]) => Math.round(Math.hypot(player.x - gx, player.y - gy)) + "px off", [route[2], route[3]]));
+} else check("tap behind a wall -> route planned", true, "skipped: no blocked spot on screen");
+
 check("all learned -> saved, no more hints", await G_(() => JSON.parse(localStorage.getItem("orcslasher_learned")).touch === LEARN_ALL && hint.cur === 0));
 await G_(() => { newRun("rifle"); });
 check("next run: shorter cinematic", await G_(() => INTRO.land < 1), await G_(() => "lands at " + INTRO.land.toFixed(2) + "s"));
