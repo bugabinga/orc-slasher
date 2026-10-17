@@ -1826,6 +1826,7 @@ function buildMap() {
   SEED = (Math.random() * 4294967296) >>> 0;
   cellCache.clear(); chunkCache.clear(); chunkDecals.clear();
   WORLD.props.clear(); WORLD.tiles.clear(); WORLD.cellTiles.clear();
+  radarReady = false;
   const R = mulberry(hash3(1, 2, 3));
   roadX = []; roadY = [];
   for (let x = 7 + Math.floor(R() * 4); x < MAP_W - 12; x += 17 + Math.floor(R() * 7)) roadX.push(x);
@@ -4554,60 +4555,144 @@ let pauseBtnRect = null, fsPauseRect = null, invRects = [];
 
 // radar, bottom-left: the streets around you (white), the horde (red);
 // the King is a gold dot, or a gold arrow on the rim when out of range
-const RADAR_W = 96, RADAR_H = 64, RADAR_TPP = 2; // tiles per radar pixel
-let radarCanvas = null, radarT = 0;
-const RADAR_COL = ["#1c1820", "#55555e", "#7a7672", "#4e4438", "#46502e", "#7a6250", "#5a5048", "#08060c"]; // by tile type; last = off-map
-function renderMinimap() {
-  if (!radarCanvas) { radarCanvas = document.createElement("canvas"); radarCanvas.width = RADAR_W; radarCanvas.height = RADAR_H; }
-  const ox = Math.floor(player.x / TILE) - RADAR_W * RADAR_TPP / 2, oy = Math.floor(player.y / TILE) - RADAR_H * RADAR_TPP / 2;
-  if ((radarT -= 1 / 60) <= 0) { // resample a few times a second
-    radarT = 0.25;
-    // fillRect runs, not putImageData: re-uploading pixel data stalls some GPUs
-    const rc = radarCanvas.getContext("2d");
-    for (let y = 0; y < RADAR_H; y++) {
-      let runX = 0, runC = -1;
-      for (let x = 0; x <= RADAR_W; x++) {
-        const tx = ox + x * RADAR_TPP, ty = oy + y * RADAR_TPP;
-        const c = x === RADAR_W ? -2 : oob(tx, ty) ? 7 : tileType(tx, ty);
-        if (c === runC) continue;
-        if (runC !== -1) { rc.fillStyle = RADAR_COL[runC]; rc.fillRect(runX, y, x - runX, 1); }
-        runX = x; runC = c;
-      }
+// round GTA-style radar: tiles are sampled into a padded canvas a few times a
+// second and scrolled by the sub-sample offset every frame, then masked to a disc
+const RADAR_R = 34, RADAR_D = RADAR_R * 2, RADAR_TPP = 2, RADAR_PAD = 10; // tiles per radar pixel
+const RADAR_S = RADAR_D + RADAR_PAD * 2;
+// by tile type: buildings, road, sidewalk, lot, grass, plaza, rubble, off-map
+const RADAR_COL = ["#2b2f3c", "#858ea0", "#3f4452", "#353946", "#2c4a35", "#8a7444", "#4d4038", "#08090d"];
+// two sample canvases: the front one is drawn while the back one refills a
+// slice of rows per frame, so a resample never costs a whole frame
+let radarCanvas = null, radarBack = null, radarDisc = null, radarBezel = null;
+let radarT = 0, radarOX = 0, radarOY = 0, radarHead = 0;
+let radarJob = -1, radarJX = 0, radarJY = 0, radarReady = false;
+const RADAR_ROWS = 22; // rows resampled per frame
+function pixelDisc(c, cx, cy, r, col) {
+  c.fillStyle = col;
+  for (let y = -r; y < r; y++) {
+    const w = Math.round(Math.sqrt(r * r - (y + 0.5) * (y + 0.5)));
+    c.fillRect(cx - w, cy + y, w * 2, 1);
+  }
+}
+function initRadar() {
+  radarCanvas = document.createElement("canvas"); radarCanvas.width = radarCanvas.height = RADAR_S;
+  radarBack = document.createElement("canvas"); radarBack.width = radarBack.height = RADAR_S;
+  radarDisc = new Path2D();
+  for (let y = -RADAR_R; y < RADAR_R; y++) {
+    const w = Math.round(Math.sqrt(RADAR_R * RADAR_R - (y + 0.5) * (y + 0.5)));
+    radarDisc.rect(RADAR_R - w, RADAR_R + y, w * 2, 1);
+  }
+  const B = RADAR_D + 8, bz = document.createElement("canvas"); bz.width = bz.height = B;
+  const c = bz.getContext("2d"), m = B / 2;
+  pixelDisc(c, m, m, RADAR_R + 4, "#07060b");
+  pixelDisc(c, m, m, RADAR_R + 3, "#4a4458");
+  c.globalCompositeOperation = "source-atop"; // light from the top-left, shade bottom-right
+  c.fillStyle = "#8a82a0"; c.fillRect(0, 0, m - 6, m - 6);
+  c.fillStyle = "#26222f"; c.fillRect(m + 6, m + 6, m, m);
+  c.globalCompositeOperation = "source-over";
+  pixelDisc(c, m, m, RADAR_R + 1, "#07060b");
+  c.globalCompositeOperation = "destination-out";
+  pixelDisc(c, m, m, RADAR_R, "#000");
+  radarBezel = bz;
+}
+function resampleRows(c, ox, oy, y0, y1) {
+  // fillRect runs, not putImageData: re-uploading pixel data stalls some GPUs
+  for (let y = y0; y < y1; y++) {
+    let runX = 0, runC = -1;
+    for (let x = 0; x <= RADAR_S; x++) {
+      const tx = ox + x * RADAR_TPP, ty = oy + y * RADAR_TPP;
+      const k = x === RADAR_S ? -2 : oob(tx, ty) ? 7 : tileType(tx, ty);
+      if (k === runC) continue;
+      if (runC !== -1) { c.fillStyle = RADAR_COL[runC]; c.fillRect(runX, y, x - runX, 1); }
+      runX = x; runC = k;
     }
   }
-  const x0 = 6, y0 = VH - RADAR_H - 6;
-  panel(x0 - 3, y0 - 3, RADAR_W + 6, RADAR_H + 6);
-  ctx.globalAlpha = 0.85;
-  ctx.drawImage(radarCanvas, x0, y0);
+}
+function stepRadar(ptx, pty, dx, dy) {
+  if (radarJob < 0) {
+    if ((radarT -= 1 / 60) > 0 && Math.abs(dx) < RADAR_PAD - 4 && Math.abs(dy) < RADAR_PAD - 4) return;
+    radarT = 0.5; // also picks up fresh rubble
+    radarJob = 0;
+    radarJX = Math.floor(ptx) - (RADAR_R + RADAR_PAD) * RADAR_TPP;
+    radarJY = Math.floor(pty) - (RADAR_R + RADAR_PAD) * RADAR_TPP;
+  }
+  const y1 = Math.min(RADAR_S, radarJob + RADAR_ROWS);
+  resampleRows(radarBack.getContext("2d"), radarJX, radarJY, radarJob, y1);
+  radarJob = y1;
+  if (radarJob >= RADAR_S) {
+    const t = radarCanvas; radarCanvas = radarBack; radarBack = t;
+    radarOX = radarJX; radarOY = radarJY; radarJob = -1;
+  }
+}
+function renderMinimap() {
+  if (!radarCanvas) initRadar();
+  const ptx = player.x / TILE, pty = player.y / TILE;
+  // radar pixels between the sample origin and where the view wants to be
+  if (!radarReady) { // new map: fill synchronously once
+    radarReady = true;
+    radarJob = -1; radarT = 0; stepRadar(ptx, pty, 0, 0);
+    while (radarJob >= 0) stepRadar(ptx, pty, 0, 0);
+  }
+  // radar pixels between the sample origin and where the view wants to be
+  const dx = (ptx - RADAR_R * RADAR_TPP - radarOX) / RADAR_TPP - RADAR_PAD;
+  const dy = (pty - RADAR_R * RADAR_TPP - radarOY) / RADAR_TPP - RADAR_PAD;
+  stepRadar(ptx, pty, dx, dy);
+
+  const x0 = 10, y0 = VH - RADAR_D - 10, cx = x0 + RADAR_R, cy = y0 + RADAR_R;
+  ctx.save();
+  ctx.translate(x0, y0); ctx.clip(radarDisc);
+  ctx.globalAlpha = 0.92;
+  ctx.drawImage(radarCanvas, -RADAR_PAD - Math.round(dx), -RADAR_PAD - Math.round(dy));
   ctx.globalAlpha = 1;
-  // sweep line
-  const sa = G.t * 2.4;
-  ctx.strokeStyle = "rgba(140,242,90,0.35)"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(x0 + RADAR_W / 2, y0 + RADAR_H / 2);
-  ctx.lineTo(x0 + RADAR_W / 2 + Math.cos(sa) * 60, y0 + RADAR_H / 2 + Math.sin(sa) * 60); ctx.stroke();
-  const rx = x => (x - player.x) / TILE / RADAR_TPP + RADAR_W / 2, ry = y => (y - player.y) / TILE / RADAR_TPP + RADAR_H / 2;
-  const dot = (x, y, col, r) => {
-    const px = rx(x), py = ry(y);
-    if (px < 0 || py < 0 || px >= RADAR_W || py >= RADAR_H) return;
-    ctx.fillStyle = col; ctx.fillRect(Math.round(x0 + px - r / 2), Math.round(y0 + py - r / 2), r, r);
-  };
+  // sweep: a soft wedge trailing the beam
+  const sa = G.t * 1.6;
+  ctx.fillStyle = "rgba(160,255,200,0.07)";
+  ctx.beginPath(); ctx.moveTo(RADAR_R, RADAR_R); ctx.arc(RADAR_R, RADAR_R, RADAR_R * 1.5, sa - 0.7, sa); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "rgba(160,255,200,0.08)";
+  ctx.beginPath(); ctx.moveTo(RADAR_R, RADAR_R); ctx.arc(RADAR_R, RADAR_R, RADAR_R * 1.5, sa - 0.25, sa); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.drawImage(radarBezel, x0 - 4, y0 - 4);
+
+  const inR = RADAR_R - 2, k = 1 / TILE / RADAR_TPP;
   for (let i = 0; i < ZOMBIES.n && i < 150; i++) {
     const z = ZO[ZOMBIES.dense[i]];
-    if (z.warmup <= 0) dot(z.x, z.y, z.bossBar ? "#ff4d4d" : "#e0303a", z.bossBar ? 3 : 1);
-  }
-  if (kingPos && Math.floor(G.t * 2) % 2) {
-    const kx = rx(kingPos.x), ky = ry(kingPos.y);
-    if (kx >= 0 && ky >= 0 && kx < RADAR_W && ky < RADAR_H) dot(kingPos.x, kingPos.y, "#ffd166", 3);
-    else {
-      const a = Math.atan2(ky - RADAR_H / 2, kx - RADAR_W / 2);
-      const k = Math.min((RADAR_W / 2 - 3) / Math.abs(Math.cos(a) || 1e-9), (RADAR_H / 2 - 3) / Math.abs(Math.sin(a) || 1e-9));
-      const ax = x0 + RADAR_W / 2 + Math.cos(a) * k, ay = y0 + RADAR_H / 2 + Math.sin(a) * k;
-      ctx.fillStyle = "#ffd166"; // pixel chevron: a dot plus a tip one step further out
-      ctx.fillRect(Math.round(ax) - 1, Math.round(ay) - 1, 3, 3);
-      ctx.fillRect(Math.round(ax + Math.cos(a) * 2), Math.round(ay + Math.sin(a) * 2), 1, 1);
+    if (z.warmup > 0) continue;
+    const px = (z.x - player.x) * k, py = (z.y - player.y) * k;
+    if (px * px + py * py > inR * inR) continue;
+    if (z.bossBar) {
+      const pulse = Math.floor(G.t * 4) % 2;
+      ctx.fillStyle = "#07060b"; ctx.fillRect(Math.round(cx + px) - 2, Math.round(cy + py) - 2, 5, 5);
+      ctx.fillStyle = pulse ? "#ff4d4d" : "#ff9a9a"; ctx.fillRect(Math.round(cx + px) - 1, Math.round(cy + py) - 1, 3, 3);
+    } else {
+      ctx.fillStyle = "#ff3846"; ctx.fillRect(Math.round(cx + px), Math.round(cy + py), 1, 1);
     }
   }
-  dot(player.x, player.y, "#ffffff", 2);
+  if (kingPos) {
+    const px = (kingPos.x - player.x) * k, py = (kingPos.y - player.y) * k, d = Math.hypot(px, py);
+    const on = Math.floor(G.t * 2.5) % 2;
+    if (d <= inR - 2) {
+      ctx.fillStyle = "#07060b"; ctx.fillRect(Math.round(cx + px) - 3, Math.round(cy + py) - 3, 7, 7);
+      ctx.fillStyle = on ? "#ffd166" : "#fff2c0"; ctx.fillRect(Math.round(cx + px) - 2, Math.round(cy + py) - 2, 5, 5);
+    } else { // gold blip pinned to the rim, nudging outward
+      const a = Math.atan2(py, px), r = RADAR_R + 1 + on;
+      const bx = Math.round(cx + Math.cos(a) * r), by = Math.round(cy + Math.sin(a) * r);
+      ctx.fillStyle = "#07060b"; ctx.fillRect(bx - 3, by - 3, 7, 7);
+      ctx.fillStyle = "#ffd166"; ctx.fillRect(bx - 2, by - 2, 5, 5);
+      ctx.fillStyle = "#07060b"; ctx.fillRect(bx, by - 1, 1, 3); ctx.fillRect(bx - 1, by, 3, 1);
+    }
+  }
+  // N marker on the bezel
+  ctx.fillStyle = "#07060b"; ctx.fillRect(cx - 4, y0 - 6, 9, 10);
+  ftx("N", cx + 1, y0 + 3, 8, "#e8dfc8", "center");
+  // the hero: a white arrow toward where they move / shoot
+  const want = aiming() ? player.atkAng : player.moving ? Math.atan2(player.vy, player.vx) : radarHead;
+  radarHead += Math.atan2(Math.sin(want - radarHead), Math.cos(want - radarHead)) * 0.25;
+  ctx.save(); ctx.translate(cx + 0.5, cy + 0.5); ctx.rotate(radarHead);
+  ctx.fillStyle = "#07060b";
+  ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(-4, -5); ctx.lineTo(-2, 0); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(-3, -3); ctx.lineTo(-1, 0); ctx.lineTo(-3, 3); ctx.closePath(); ctx.fill();
+  ctx.restore();
 }
 
 // armorer-only (dev mode): switch to any gun mid-run, stats rebuilt from
