@@ -6255,10 +6255,10 @@ function fxTargets(R) {
 // fragment work; the CSS keeps object-fit: contain, so the aspect never changes
 const fxPerf = { ema: 16.7, slowT: 0, capMP: 2.4 };
 function fitView() {
-  // the space inside the safe-area padding, in device pixels
-  const dpr = window.devicePixelRatio || 1, bs = getComputedStyle(document.body);
-  const cssW = innerWidth - parseFloat(bs.paddingLeft) - parseFloat(bs.paddingRight);
-  const cssH = innerHeight - parseFloat(bs.paddingTop) - parseFloat(bs.paddingBottom);
+  // the body's content box (inside any safe-area padding), in device pixels
+  const dpr = window.devicePixelRatio || 1, body = document.body, bs = getComputedStyle(body);
+  const cssW = (body.clientWidth || innerWidth) - parseFloat(bs.paddingLeft) - parseFloat(bs.paddingRight);
+  const cssH = (body.clientHeight || innerHeight) - parseFloat(bs.paddingTop) - parseFloat(bs.paddingBottom);
   const dw = Math.floor(cssW * dpr), dh = Math.floor(cssH * dpr);
   let vw = 480, vh = 270, k = 0;
   if (dw > dh && dh >= 200) {
