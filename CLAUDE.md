@@ -150,6 +150,14 @@ src/game.js` before building.
   honoured by auto-aim via `focusTarget`. `usingTouch` switches hint
   texts and tap padding (`tapPad`); `buzz(ms)` = haptics. Portrait on a
   phone shows the `#rotate` card (index.html CSS) and pauses
+- **Intro / hints**: `startIntro(1)` on `newRun` = King shot → whip-pan
+  (`introCam` overrides the camera) → hero drop (`player.dropZ`,
+  `heroLands`); `introLocked()` freezes the world and hides the HUD; any
+  input → `skipIntro()`; shorter once all hints are learned. `startIntro(2)`
+  on waves 2+ = 0.55s whip from a spawn point, no lock. `renderLetterbox`.
+  Hints: one label-free pixel prompt (keys / mouse / ghost hand) at a time;
+  `learn(LEARN_MOVE|AIM|DASH)` pops it and saves per input type in
+  localStorage `orcslasher_learned`. Bench/profile call `skipIntro()`
 - **Rendering**: the game draws VW×270 into two layers — `sceneCtx`
   (world) and `uiCtx` (HUD, damage numbers, overlays; never lit). `ctx`
   points at the current one; `frame()` switches it. Feet-anchored

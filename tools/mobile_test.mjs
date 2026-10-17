@@ -28,6 +28,7 @@ const shot = async n => { if (args.shots) await page.screenshot({ path: path.joi
 
 await page.goto("file://" + file);
 await page.waitForFunction(() => typeof assetsLeft !== "undefined" && assetsLeft === 0);
+await page.evaluate(() => { localStorage.removeItem("orcslasher_learned"); learned.desk = learned.touch = 0; });
 await wait(300);
 // game px -> client px (2D path: no CRT warp)
 const toClient = (x, y) => page.evaluate(([x, y]) => {
@@ -53,6 +54,9 @@ await tap(...rectMid(await G_(() => clsRects[0])));
 check("tap hero -> gun shop", await G_(() => G.state) === "select", await G_(() => G.state));
 await tap(...rectMid(await G_(() => selectRects[0])));
 check("tap gun -> play", await G_(() => G.state) === "play", await G_(() => G.state));
+check("run opens with the cinematic (input locked)", await G_(() => introLocked()));
+await tap(200, 200);
+check("a tap skips it", await G_(() => !introLocked() && player.dropZ === 0));
 await G_(() => { player.hp = player.stats.maxHp = 1e9; clearZombies(); spawnQueue = [{ type: "walker", at: 9999 }]; G.sayQ = []; });
 await wait(600);
 
@@ -67,6 +71,7 @@ const v1 = await G_(() => Math.hypot(player.vx, player.vy));
 check("hold right of hero -> runs right", x1 - x0 > 40, `moved ${Math.round(x1 - x0)}px`);
 check("release -> stops", v1 < 5, `speed ${v1.toFixed(1)}`);
 check("no dash from a hold", await G_(() => player.dashCd) === 0);
+check("hold taught 'move' (hint pops)", await G_(() => (learned.touch & LEARN_MOVE) !== 0));
 await shot("hold");
 
 // tap the street -> walk there
@@ -96,6 +101,7 @@ await wait(30); await touches("touchMove", [{ x: 230, y: 140, id: 1 }]);
 await wait(30); await touches("touchMove", [{ x: 260, y: 140, id: 1 }]);
 await touches("touchEnd", []);
 check("flick -> dash", await G_(() => player.dashCd > 0), await G_(() => "cd " + player.dashCd.toFixed(2)));
+check("flick taught 'dash'", await G_(() => (learned.touch & LEARN_DASH) !== 0));
 
 // holding + second finger -> dash, movement keeps going
 await G_(() => { player.dashCd = 0; });
@@ -116,6 +122,7 @@ await wait(50);
 // an on-screen zombie (spawnEnemy moves ones placed inside buildings)
 const zt = await G_(() => { for (let i = 0; i < ZOMBIES.n; i++) { const z = ZO[ZOMBIES.dense[i]], x = z.x - G.cam.x, y = z.y - G.cam.y; if (x > 60 && x < VW - 60 && y > 70 && y < VH - 30) return [x, y, z.e]; } return [0, 0, -1]; });
 await tap(zt[0], zt[1]);
+check("tap taught 'focus'", await G_(() => (learned.touch & LEARN_AIM) !== 0));
 check("tap zombie -> focused", await G_(e => !!focus.z && focus.e === e, zt[2]), await G_(e => JSON.stringify({ fe: focus.e, e, goal: touch.goal, alive: eAlive(e) }), zt[2]));
 await shot("focus");
 await wait(1500);
@@ -136,6 +143,11 @@ if (car) {
   await wait(1500);
   check("focused car takes fire", await G_(hp0 => !focus.p || focus.p.hp < hp0 || focus.p.state !== 0, car[2]));
 } else check("tap car -> focused", true, "skipped: no car in range on this map");
+
+check("all learned -> saved, no more hints", await G_(() => JSON.parse(localStorage.getItem("orcslasher_learned")).touch === LEARN_ALL && hint.cur === 0));
+await G_(() => { newRun("rifle"); });
+check("next run: shorter cinematic", await G_(() => INTRO.land < 1), await G_(() => "lands at " + INTRO.land.toFixed(2) + "s"));
+await G_(() => skipIntro());
 
 // portrait: turn-your-phone card + pause
 await page.setViewportSize({ width: 393, height: 851 });

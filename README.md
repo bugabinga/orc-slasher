@@ -36,6 +36,10 @@ offline, on desktop and phone.
   at your feet fills while the dash recharges
 - Shooting stays automatic; hits and explosions buzz (Android)
 
+Every run opens with a short cinematic (tap or press anything to skip),
+and the first time you play, little animated prompts next to your hero show
+each move — do it once and it's ticked off for good.
+
 **Score:** every kill pays `$`. Chain kills within 3 seconds for a combo —
 every 6 kills raises the multiplier (up to ×10), gibs pay ×1.5 and kills
 by exploding cars/barrels ×2. Taking a hit breaks the chain. Easy to
