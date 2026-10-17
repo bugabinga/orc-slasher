@@ -1233,6 +1233,10 @@ const WPN_MAX_LV = 5;
 const wpnLevel = id => META.wpn[id] || 0;
 const wpnUpCost = id => 40 + wpnLevel(id) * 60; // 40, 100, 160, 220, 280
 function saveMeta() { try { localStorage.setItem("orcslasher_meta", JSON.stringify(META)); } catch (e) { /* no storage */ } }
+// a run's score counts as soon as the run ends, won or lost
+function recordBest() {
+  if (G.score > (META.best || 0)) { META.best = G.score; saveMeta(); }
+}
 function bankCoins() {
   if (G.bankedRun || !G.coins) return;
   META.gold += Math.round(G.coins);
@@ -1962,7 +1966,7 @@ function killEnemy(z, how) {
   if (z.boss) {
     G.trauma = 1; G.slowMo = 1.2;
     explode(z.x, z.y - 8, 60, 0, false, EX_FX);
-    if (!G.endless) { G.state = "victory"; SFX.waveClear(); }
+    if (!G.endless) { G.state = "victory"; recordBest(); SFX.waveClear(); }
   }
 }
 
@@ -2571,7 +2575,7 @@ function hurtPlayer(dmg) {
     G.wasted = 2.2;
     banner("WASTED", "", "#e4485a", 2.4, true);
     bankCoins();
-    if (G.score > (META.best || 0)) { META.best = G.score; saveMeta(); }
+    recordBest();
     SFX.bossRoar();
   }
 }
@@ -2646,7 +2650,7 @@ function updatePlay(rawDt) {
       SFX.level();
       say("A survivor… and armed to the teeth!", 1.5);
     }
-    if (G.wave === FINAL_WAVE && !G.endless) G.state = "victory"; // safety net: victory comes from the boss kill
+    if (G.wave === FINAL_WAVE && !G.endless) { G.state = "victory"; recordBest(); } // safety net: victory comes from the boss kill
     else enterCampfire();
   }
 }
