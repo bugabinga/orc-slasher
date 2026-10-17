@@ -3347,6 +3347,7 @@ function panel(x, y, w, h, edge = "#3a3346") {
 
 function renderHUD() {
   if (introLocked()) { renderBanners(); renderLetterbox(); return; } // cinematic: no HUD yet
+  renderRoute();
   renderHints();
   const st = player.stats, t = G.t, w = WEAPONS[G.weapon];
   // --- top-left: the gun, its ammo, health
@@ -3435,6 +3436,26 @@ function renderHUD() {
   renderLetterbox();
 }
 
+// walk-to marker and GPS-style dotted route; drawn before the HUD so the
+// radar and panels sit on top of them
+function renderRoute() {
+  if (!usingTouch) return;
+  const ox = G.cam.x, oy = G.cam.y, t = G.t;
+  if (touch.goal) {
+    const x = Math.round(touch.gx - ox), y = Math.round(touch.gy - oy), k = Math.floor(t * 8) % 4;
+    ctx.fillStyle = "rgba(120,255,220,0.8)";
+    ctx.fillRect(x - 5 - k, y, 3, 1); ctx.fillRect(x + 3 + k, y, 3, 1);
+    ctx.fillRect(x, y - 4 - k, 1, 3); ctx.fillRect(x, y + 2 + k, 1, 3);
+  }
+  if (!(touch.goal || touch.id !== -1) || PATH.n < 2) return;
+  ctx.fillStyle = "rgba(120,255,220,0.85)";
+  let ax = player.x, ay = player.y, phase = (t * 24) % 6;
+  for (let i = PATH.i; i < PATH.n; i++) {
+    const bx = PATH.x[i], by = PATH.y[i], d = Math.hypot(bx - ax, by - ay);
+    for (let s = phase; s < d; s += 6) ctx.fillRect(Math.round(ax + (bx - ax) * s / d - ox), Math.round(ay + (by - ay) * s / d - oy), 1, 1);
+    phase = (phase - d % 6 + 6) % 6; ax = bx; ay = by;
+  }
+}
 // touch feedback in the world, no on-screen sticks: focus brackets on the
 // locked target, a marker where you tapped, a ring under the held finger,
 // and a dash-ready arc at the hero's feet
@@ -3450,21 +3471,6 @@ function renderTouchMarks() {
     }
   }
   if (!usingTouch) return;
-  if ((touch.goal || touch.id !== -1) && PATH.n > 1) { // GPS-style dotted route, crawling forward
-    ctx.fillStyle = "rgba(120,255,220,0.85)";
-    let ax = player.x, ay = player.y, phase = (t * 24) % 6;
-    for (let i = PATH.i; i < PATH.n; i++) {
-      const bx = PATH.x[i], by = PATH.y[i], d = Math.hypot(bx - ax, by - ay);
-      for (let s = phase; s < d; s += 6) ctx.fillRect(Math.round(ax + (bx - ax) * s / d - ox), Math.round(ay + (by - ay) * s / d - oy), 1, 1);
-      phase = (phase - d % 6 + 6) % 6; ax = bx; ay = by;
-    }
-  }
-  if (touch.goal) {
-    const x = Math.round(touch.gx - ox), y = Math.round(touch.gy - oy), k = Math.floor(t * 8) % 4;
-    ctx.fillStyle = "rgba(120,255,220,0.8)";
-    ctx.fillRect(x - 5 - k, y, 3, 1); ctx.fillRect(x + 3 + k, y, 3, 1);
-    ctx.fillRect(x, y - 4 - k, 1, 3); ctx.fillRect(x, y + 2 + k, 1, 3);
-  }
   if (touch.id !== -1) {
     ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(Math.round(touch.x) + 0.5, Math.round(touch.y) + 0.5, 7, 0, Math.PI * 2); ctx.stroke();
