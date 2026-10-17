@@ -136,9 +136,13 @@ src/game.js` before building.
   and points at the King. Bump `mapStamp` once per frame (LRU clock)
 - **States**: title → credits (optional) → cls → select → play ⇄ campfire
   → gameover/victory. All input goes through `handleKey` / `handleClick`
-- **View**: 270 rows; `VW` (a `let`) follows the screen's shape, 480–640
-  (`fitView`, on resize). Never cache anything sized by VW at load time —
-  rebuild it in `fitView` (FX targets via `fxTargets`, shaders get `uRes`/`RES`)
+- **View**: `VW`×`VH` are `let`s set by `fitView` (on resize): a whole
+  number `VIEW_K` of device px per game px (crisp pixels; the canvas gets an
+  exact CSS size), ≤240 rows on phones / ≤300 on desktop, ≥200; width
+  400–640. 960×540 and 1080p stay 480×270. Never cache anything sized by
+  VW/VH at load — rebuild it in `fitView` (FX via `fxTargets`, shaders get
+  `uRes`/`RES`). `compactUI()` (VH < 250) switches menus to tight layouts
+  (small logo, one-line hero cards, slim gun rows, no campfire scene)
 - **Sprite atlas** (`buildAtlas`, first frame after load): every sprite +
   its mirror image packed into 2048² pages; tinted copies go on 512² pages
   during play. `im.atl` = slot. Draw sprites with `dimg(g, im, x, y, w?, h?)`

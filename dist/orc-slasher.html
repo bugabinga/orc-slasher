@@ -11,6 +11,7 @@
   html, body { margin: 0; height: 100%; background: #0b0910; overflow: hidden; }
   body {
     box-sizing: border-box; height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
     /* keep the game clear of notches and rounded corners */
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
@@ -1425,11 +1426,11 @@ window.CREDITS = {
 
 // ------------------------------------------------------------------ setup --
 const canvas = document.getElementById("game"); // what the player sees (WebGL2, or 2D fallback)
-// the view is always 270 rows; its width follows the screen's shape (480 at
-// 16:9 up to 640 on long phones) so wide screens fill instead of letterboxing.
-// fitView() changes it; anything sized by VW is rebuilt there.
-let VW = canvas.width;
-const VH = canvas.height;
+// the view size follows the screen: a whole number of device pixels per game
+// pixel (crisp, even pixels) with ~200-300 rows — phones get fewer rows, so
+// everything, text included, draws bigger. fitView() sets it; anything sized
+// by VW/VH is rebuilt there.
+let VW = canvas.width, VH = canvas.height, VIEW_K = 0;
 // the game draws into two offscreen layers: the world scene (lit by the FX
 // pass) and the UI on top (never lit). `ctx` points at whichever is current.
 const sceneCanvas = document.createElement("canvas"), uiCanvas = document.createElement("canvas");
@@ -4240,10 +4241,10 @@ function collectLights(cx, cy) {
 let darkCanvas = null, darkCtx = null;
 // 2D fallback night: the light map is soft, so it is built at 1/4 resolution
 // (16x fewer pixels to composite) and smoothly upscaled
-const DARK_S = 4, DARK_H = Math.ceil(VH / DARK_S);
-let DARK_W = 0;
+const DARK_S = 4;
+let DARK_W = 0, DARK_H = 0;
 function renderDarkness(cx, cy) {
-  if (!darkCanvas || DARK_W !== Math.ceil(VW / DARK_S)) { DARK_W = Math.ceil(VW / DARK_S); darkCanvas = document.createElement("canvas"); darkCanvas.width = DARK_W; darkCanvas.height = DARK_H; darkCtx = darkCanvas.getContext("2d"); }
+  if (!darkCanvas || DARK_W !== Math.ceil(VW / DARK_S) || DARK_H !== Math.ceil(VH / DARK_S)) { DARK_W = Math.ceil(VW / DARK_S); DARK_H = Math.ceil(VH / DARK_S); darkCanvas = document.createElement("canvas"); darkCanvas.width = DARK_W; darkCanvas.height = DARK_H; darkCtx = darkCanvas.getContext("2d"); }
   const dc = darkCtx;
   dc.globalCompositeOperation = "source-over";
   dc.globalAlpha = 1;
@@ -4528,7 +4529,9 @@ function fontAtlas(col, bold, flat = false) {
     for (let y = 0; y < 8; y++) for (let x = 0; x < 5; x++) {
       if (!glyphMask[i * 40 + y * 5 + x]) continue;
       fill[(y + 1) * cw + x + 1] = 1;
-      if (bold) fill[(y + 1) * cw + x + 2] = 1;
+      // bold widens strokes rightward, but never fills a 1px gap (W, M, N stay open)
+      const m = i * 40 + y * 5;
+      if (bold && (x === 4 || glyphMask[m + x + 1] || x === 3 || !glyphMask[m + x + 2])) fill[(y + 1) * cw + x + 2] = 1;
     }
     for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
       const o = (y * c.width + i * cw + x) * 4;
@@ -4762,10 +4765,11 @@ const CORNERS = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
 // Wave 2+: a quick whip from where the dead will come. Letterbox bars frame both.
 const INTRO = { kind: 0, t: 0, king: 0, pan: 0, land: 0, end: 0, landed: true, fx: 0, fy: 0 };
 const DROP_T = 0.25, BARS_OUT = 0.35, WAVE_WHIP = 0.55;
+let introRuns = 0; // the full version plays once per session; retries get the short one
 function startIntro(kind) {
   INTRO.kind = kind; INTRO.t = 0;
   if (kind === 1) {
-    const fast = (learned.desk & LEARN_ALL) === LEARN_ALL || (learned.touch & LEARN_ALL) === LEARN_ALL;
+    const fast = introRuns++ > 0 || (learned.desk & LEARN_ALL) === LEARN_ALL || (learned.touch & LEARN_ALL) === LEARN_ALL;
     INTRO.king = kingPos ? (fast ? 0.25 : 0.7) : 0;
     INTRO.pan = INTRO.king + (kingPos ? (fast ? 0.45 : 0.65) : 0.2);
     INTRO.land = INTRO.pan + (fast ? 0.2 : DROP_T);
@@ -4919,6 +4923,7 @@ function bubble(cx, cy, w, h, px, py) {
   for (let i = 0; i < 4; i++) ctx.fillRect(tx - 3 + i, below ? y + h + i : y - 1 - i, 7 - i * 2, 1);
 }
 function renderHints() {
+  if (G.paused || G.wasted) return;
   const ox = G.cam.x, oy = G.cam.y, t = G.t;
   const px = Math.round(player.x - ox), py = Math.round(player.y - oy);
   const above = py - 48 > 54, cx = px, cy = above ? py - 44 : py + 30;
@@ -5294,8 +5299,11 @@ function renderCampfire(dt) {
   g.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
 
-  drawSprite(animFrame(ANIM.campfire, campfire.t, 8), VW / 2, 88, false, 2);
-  drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], campfire.t, 6), VW / 2 - 34, 86, false);
+  const tight = compactUI(); // short screens: the cards take the fire's place
+  if (!tight) {
+    drawSprite(animFrame(ANIM.campfire, campfire.t, 8), VW / 2, 88, false, 2);
+    drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], campfire.t, 6), VW / 2 - 34, 86, false);
+  }
   ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#ffd166";
   ftext(`WAVE ${G.wave} CLEARED`, VW / 2, 26);
   ctx.font = "8px monospace"; ctx.fillStyle = "#cfc6de";
@@ -5311,10 +5319,10 @@ function renderCampfire(dt) {
   cardRects = []; nextRect = null;
   if (campfire.picksLeft > 0) {
     const n = campfire.cards.length;
-    const cw = 122, chh = 128, gap = 12;
+    const cw = 122, chh = tight ? Math.min(128, VH - 50 - 40) : 128, gap = 12;
     const total = n * cw + (n - 1) * gap;
     for (let i = 0; i < n; i++) {
-      const x = VW / 2 - total / 2 + i * (cw + gap), y = 100;
+      const x = VW / 2 - total / 2 + i * (cw + gap), y = tight ? 50 : 100;
       cardRects.push({ x, y, w: cw, h: chh, i });
       const c = campfire.cards[i];
       const rar = RARITY[c.r];
@@ -5350,7 +5358,7 @@ function renderCampfire(dt) {
       ctx.restore();
     }
   } else {
-    const bw = 150, bh = 30, bx = VW / 2 - bw / 2, by = 140;
+    const bw = 150, bh = 30, bx = VW / 2 - bw / 2, by = tight ? Math.round(VH / 2 - 15) : 140;
     nextRect = { x: bx, y: by, w: bw, h: bh };
     ctx.fillStyle = "#241c2e"; ctx.fillRect(bx, by, bw, bh);
     ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
@@ -5401,13 +5409,16 @@ function renderCampfire(dt) {
   }
 }
 
-function wrapText(text, x, y, maxW, lh) {
+// short screens (phones: ~200-240 rows) get tighter menu layouts
+const compactUI = () => VH < 250;
+function wrapText(text, x, y, maxW, lh, maxLines = 99) {
   const words = text.split(" ");
-  let line = "", yy = y;
+  let line = "", yy = y, n = 1;
   for (const w of words) {
     const test = line ? line + " " + w : w;
     if (fmeasure(test) > maxW && line) {
-      ftext(line, x, yy); line = w; yy += lh;
+      if (n >= maxLines) { ftext(line + "…", x, yy); return; }
+      ftext(line, x, yy); line = w; yy += lh; n++;
     } else line = test;
   }
   ftext(line, x, yy);
@@ -5690,11 +5701,12 @@ function renderClassSelect(t) {
     const hot = unlocked && Math.floor(t * 2 + i) % 7 === 0;
     panel(x, y, cw, chh, unlocked ? (hot ? "#ffd166" : "#8a6a30") : "#2a2434");
     ctx.fillStyle = unlocked ? "rgba(255,209,102,0.06)" : "rgba(0,0,0,0.3)"; ctx.fillRect(x + 1, y + 1, 40, chh - 2);
-    drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + 21, y + chh - 8, false, 1.6, unlocked ? 1 : 0.3);
+    const tight = chh < 50;
+    drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + 21, y + chh - (tight ? 5 : 8), false, tight ? 1 : 1.6, unlocked ? 1 : 0.3);
     ftx(`${i + 1}`, x + 4, y + 11, 8, "#a5834a");
     ftx(c.name.toUpperCase(), x + 46, y + 14, 9, unlocked ? "#ffffff" : "#6f6485");
     ctx.font = "8px monospace"; ctx.fillStyle = unlocked ? "#b9aed0" : "#57506b"; ctx.textAlign = "left";
-    wrapText(unlocked ? c.desc : unlockHint(id, c), x + 46, y + 26, cw - 50, 9);
+    if (unlocked || !tight) wrapText(unlocked ? c.desc : unlockHint(id, c), x + 46, y + 26, cw - 50, 9, Math.max(1, Math.floor((chh - 22 - (unlocked ? 0 : 10)) / 9)));
     if (!unlocked) {
       const afford = META.gold >= c.price;
       ftx(`BUY $${c.price}`, x + cw - 6, y + chh - 6, 9, afford ? "#8cf25a" : "#57506b", "right");
@@ -5719,7 +5731,9 @@ function renderSelect(t) {
   selectRects = []; upRects = [];
   const ids = CLASSES[G.cls].weapons;
   const many = ids.length > 4;
-  const pw = many ? 196 : 330, ph = many ? 30 : 46, gap = 6;
+  const gap = 6, nRows = many ? Math.ceil(ids.length / 2) : ids.length;
+  const pw = many ? 196 : 330, ph = Math.min(many ? 30 : 46, Math.floor((VH - 68 - 16 - (nRows - 1) * gap) / nRows));
+  const slim = many || ph < 44; // no room for the description line
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], w = WEAPONS[id];
     const unlocked = isUnlocked(w.unlock);
@@ -5736,8 +5750,8 @@ function renderSelect(t) {
     const lv = wpnLevel(id);
     ftx(`${i + 1} ${w.name.toUpperCase()}${lv > 0 ? ` +${lv}` : ""}`, x + 44, y + 13, 9, unlocked ? "#ffffff" : "#57506b");
     const dmgNow = big(w.dmg * (1 + 0.08 * lv));
-    if (!many) ftx(unlocked ? w.desc : "locked", x + 44, y + 25, 8, unlocked ? "#b9aed0" : "#453f58");
-    ftx(`DMG ${dmgNow}${w.pellets ? "x" + w.pellets : ""}${w.blast ? " AOE" : ""} · ${w.atkSpd}/S · ${w.clip} RDS`, x + 44, y + (many ? 25 : 38), 8, unlocked ? "#ffd166" : "#453f58");
+    if (!slim) ftx(unlocked ? w.desc : "locked", x + 44, y + 25, 8, unlocked ? "#b9aed0" : "#453f58");
+    ftx(`DMG ${dmgNow}${w.pellets ? "x" + w.pellets : ""}${w.blast ? " AOE" : ""} · ${w.atkSpd}/S · ${w.clip} RDS`, x + 44, y + (slim ? 25 : 38), 8, unlocked ? "#ffd166" : "#453f58");
     // upgrade button (persistent, costs banked gold, price climbs per level)
     if (unlocked) {
       const ur = { x: x + pw - 52, y: y + 3, w: 48, h: ph - 6, id };
@@ -5747,8 +5761,8 @@ function renderSelect(t) {
       ctx.strokeStyle = afford ? "#8cf25a" : "#3a3346"; ctx.strokeRect(ur.x + 0.5, ur.y + 0.5, ur.w - 1, ur.h - 1);
       if (maxed) ftx("MAX", ur.x + ur.w / 2, ur.y + ur.h / 2 + 4, 9, "#ffd166", "center");
       else {
-        ftx("+8%", ur.x + ur.w / 2, ur.y + ur.h / 2 - (many ? 1 : 2), 8, afford ? "#ffffff" : "#57506b", "center");
-        ftx("$" + cost, ur.x + ur.w / 2, ur.y + ur.h / 2 + (many ? 9 : 10), 8, afford ? "#8cf25a" : "#57506b", "center");
+        ftx("+8%", ur.x + ur.w / 2, ur.y + ur.h / 2 - (slim ? 1 : 2), 8, afford ? "#ffffff" : "#57506b", "center");
+        ftx("$" + cost, ur.x + ur.w / 2, ur.y + ur.h / 2 + (slim ? 9 : 10), 8, afford ? "#8cf25a" : "#57506b", "center");
       }
     }
   }
@@ -5765,9 +5779,11 @@ function renderSelect(t) {
 // the logo is built once: a thick black outline, a hot gradient fill, then
 // "BLASTER" on a red slab underneath, all in the pixel font
 let logoCanvas = null;
-function buildLogo() {
+// small: glyph scale 5/3 instead of 6/4, for screens where the title shares
+// its row with the buttons
+function buildLogo(small = false) {
   const c = document.createElement("canvas");
-  c.width = 460; c.height = 110;
+  c.width = 460; c.height = 110; c.small = small;
   const g = c.getContext("2d"), keep = ctx;
   g.imageSmoothingEnabled = false;
   ctx = g;
@@ -5792,12 +5808,14 @@ function buildLogo() {
     ctx = g;
     g.drawImage(l, 0, 0);
   };
-  word("ZOMBIE", 230, 62, 42, "#120a10", "#ffffff", [[0, "#fff3a0"], [0.3, "#ffc83a"], [0.6, "#ff7a1a"], [0.85, "#d8261a"], [1, "#7a0810"]]);
-  g.fillStyle = "#120a10"; g.fillRect(100, 67, 260, 37);
-  g.fillStyle = "#b81414"; g.fillRect(102, 69, 256, 33);
-  g.fillStyle = "#e0303a"; g.fillRect(102, 69, 256, 2);
-  g.fillStyle = "#7a0810"; g.fillRect(102, 99, 256, 3);
-  word("BLASTER", 230, 95, 28, "#120a10", "#ffffff", null);
+  const L = small ? { zy: 52, zs: 35, bx: 124, by: 56, bw: 212, bh: 31, ty: 81, ts: 21 }
+    : { zy: 62, zs: 42, bx: 100, by: 67, bw: 260, bh: 37, ty: 95, ts: 28 };
+  word("ZOMBIE", 230, L.zy, L.zs, "#120a10", "#ffffff", [[0, "#fff3a0"], [0.3, "#ffc83a"], [0.6, "#ff7a1a"], [0.85, "#d8261a"], [1, "#7a0810"]]);
+  g.fillStyle = "#120a10"; g.fillRect(L.bx, L.by, L.bw, L.bh);
+  g.fillStyle = "#b81414"; g.fillRect(L.bx + 2, L.by + 2, L.bw - 4, L.bh - 4);
+  g.fillStyle = "#e0303a"; g.fillRect(L.bx + 2, L.by + 2, L.bw - 4, 2);
+  g.fillStyle = "#7a0810"; g.fillRect(L.bx + 2, L.by + L.bh - 5, L.bw - 4, 3);
+  word("BLASTER", 230, L.ty, L.ts, "#120a10", "#ffffff", null);
   ctx = keep;
   return c;
 }
@@ -5921,14 +5939,21 @@ function renderTitle(t) {
 
   // the logo: drops in, then breathes; a dying neon flicker now and then
   const drop = Math.min(1, t * 1.5);
-  const lx = Math.round((VW - logoCanvas.width) / 2);
-  const ly = Math.round(-120 + (8 + 120) * (1 - Math.pow(1 - drop, 3)) + Math.sin(t * 2) * 1.5);
+  // short screens lift the logo into the button row: centre it between the
+  // CREDITS link and the buttons instead
+  let left = 0, right = VW;
+  if (compactUI() && sndBtnRects.length) { left = 70; for (const r of sndBtnRects) right = Math.min(right, r.x - 6); }
+  const small = right - left < 280;
+  if (logoCanvas.small !== small) logoCanvas = buildLogo(small);
+  const lx = Math.round((left + right) / 2 - logoCanvas.width / 2);
+  const sq = Math.min(0, VH - 270); // rows short of the 270 layout
+  const ly = Math.round(-120 + (8 + 120 + sq * 0.3) * (1 - Math.pow(1 - drop, 3)) + Math.sin(t * 2) * 1.5);
   const flicker = Math.sin(t * 13) + Math.sin(t * 31) > 1.7 ? 0.45 : 1;
   ctx.globalAlpha = 0.6; ctx.drawImage(logoCanvas, lx + 4, ly + 5); // drop shadow, tinted dark
   ctx.globalAlpha = flicker; ctx.drawImage(logoCanvas, lx, ly);
   ctx.globalAlpha = 1;
   // blood running off the letters
-  if (Math.random() < 0.08) tf.drips.push({ x: rnd(130, 350), y: ly + 64, v: 0, len: rnd(2, 5) });
+  if (Math.random() < 0.08) tf.drips.push({ x: lx + rnd(130, 330), y: ly + (logoCanvas.small ? 52 : 64), v: 0, len: rnd(2, 5) });
   for (let i = tf.drips.length - 1; i >= 0; i--) {
     const d = tf.drips[i];
     d.v += dt * 40; d.y += d.v * dt;
@@ -5938,10 +5963,10 @@ function renderTitle(t) {
 
   // tagline types itself out, the prompt pulses
   const tag = "THE DEAD RUN THIS CITY. TAKE IT BACK.";
-  ftx(tag.slice(0, Math.max(0, Math.floor((t - 0.8) * 28))), VW / 2, 132, 9, "#e8dfc8", "center");
+  ftx(tag.slice(0, Math.max(0, Math.floor((t - 0.8) * 28))), VW / 2, Math.round(132 + sq * 0.43), 9, "#e8dfc8", "center");
   const pulse = Math.floor(t * 2.5) % 2;
-  ftx(usingTouch ? (pulse ? "> TAP TO START <" : "  TAP TO START  ") : pulse ? "> PRESS ENTER <" : "  PRESS ENTER  ", VW / 2, 158, 14, pulse ? "#ffd166" : "#ffffff", "center");
-  if (META.best) ftx("BEST $" + String(META.best).padStart(8, "0"), VW / 2, 172, 8, "#8cf25a", "center");
+  ftx(usingTouch ? (pulse ? "> TAP TO START <" : "  TAP TO START  ") : pulse ? "> PRESS ENTER <" : "  PRESS ENTER  ", VW / 2, Math.round(158 + sq * 0.52), 14, pulse ? "#ffd166" : "#ffffff", "center");
+  if (META.best) ftx("BEST $" + String(META.best).padStart(8, "0"), VW / 2, Math.round(172 + sq * 0.55), 8, "#8cf25a", "center");
 
   // credits link
   creditsRect = { x: 6, y: 6, w: 64, h: 16 };
@@ -5952,14 +5977,16 @@ function renderTitle(t) {
 
 function renderEnd(victory, t) {
   ctx.fillStyle = victory ? "rgba(8,14,10,0.78)" : "rgba(20,4,8,0.8)"; ctx.fillRect(0, 0, VW, VH);
+  const tight = compactUI();
+  const py = tight ? 62 : 112, qy = tight ? VH - 22 : 198, ay = tight ? VH - 8 : 214;
   if (victory) {
-    ftx("MISSION PASSED", VW / 2, 78, 28, "#ffd166", "center", true);
-    ftx("RESPECT +", VW / 2, 98, 14, "#8cf25a", "center");
+    ftx("MISSION PASSED", VW / 2, tight ? 38 : 78, tight ? 21 : 28, "#ffd166", "center", true);
+    ftx("RESPECT +", VW / 2, tight ? 54 : 98, tight ? 9 : 14, "#8cf25a", "center");
   } else {
     const wob = Math.round(Math.sin(t * 3) * 2);
-    ftx("WASTED", VW / 2, 86 + wob, 42, "#e4485a", "center", true);
+    ftx("WASTED", VW / 2, (tight ? 50 : 86) + wob, tight ? 28 : 42, "#e4485a", "center", true);
   }
-  panel(VW / 2 - 110, 112, 220, 70);
+  panel(VW / 2 - 110, py, 220, 70);
   const rows = [
     ["SCORE", "$" + String(G.score).padStart(8, "0"), "#8cf25a"],
     ["BEST", "$" + String(Math.max(META.best || 0, G.score)).padStart(8, "0"), "#ffd166"],
@@ -5968,17 +5995,17 @@ function renderEnd(victory, t) {
     ["WAVE", String(G.wave), "#ffffff"],
   ];
   rows.forEach(([k, v, col], i) => {
-    ftx(k, VW / 2 - 100, 126 + i * 12, 8, "#8f84a8");
-    ftx(v, VW / 2 + 100, 126 + i * 12, 9, col, "right");
+    ftx(k, VW / 2 - 100, py + 14 + i * 12, 8, "#8f84a8");
+    ftx(v, VW / 2 + 100, py + 14 + i * 12, 9, col, "right");
   });
+  ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff"; ctx.textAlign = "center";
+  const blink = Math.floor(t * 2) % 2 ? "#ffffff" : "#ffd166";
   if (victory) {
-    ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff"; ctx.textAlign = "center";
-    ftext("“It is done. Rest now, my King.”", VW / 2, 198);
-    ftx(usingTouch ? "TAP TO KEEP BLASTING (ENDLESS)" : "[E] KEEP BLASTING (ENDLESS)   [ENTER] NEW RUN", VW / 2, 214, 8, Math.floor(t * 2) % 2 ? "#ffffff" : "#ffd166", "center");
+    ftext("“It is done. Rest now, my King.”", VW / 2, qy);
+    ftx(usingTouch ? "TAP TO KEEP BLASTING (ENDLESS)" : "[E] KEEP BLASTING (ENDLESS)   [ENTER] NEW RUN", VW / 2, ay, 8, blink, "center");
   } else {
-    ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff"; ctx.textAlign = "center";
-    ftext("“Forgive me, my King…”", VW / 2, 198);
-    ftx(usingTouch ? "TAP TO TRY AGAIN" : "[ENTER] TRY AGAIN", VW / 2, 214, 9, Math.floor(t * 2) % 2 ? "#ffffff" : "#ffd166", "center");
+    ftext("“Forgive me, my King…”", VW / 2, qy);
+    ftx(usingTouch ? "TAP TO TRY AGAIN" : "[ENTER] TRY AGAIN", VW / 2, ay, 9, blink, "center");
   }
 }
 
@@ -6195,7 +6222,7 @@ function initFX() {
       bright: program(FS_BRIGHT, ["uSrc"]),
       blur: program(FS_BLUR, ["uSrc", "uDir"]),
       final: program(FS_FINAL, ["uLitT", "uBloom", "uUI", "uOut", "uTime", "uFx", "uHurt", "uLow", "uChroma", "uShock", "uNS", "RES"]),
-      scene: null, ui: null, lit: null, bloomA: null, bloomB: null, vw: 0, tex, target,
+      scene: null, ui: null, lit: null, bloomA: null, bloomB: null, vw: 0, vh: 0, tex, target,
       vao: gl.createVertexArray(),
       lightPos: new Float32Array(MAX_LIGHTS * 4), lightCol: new Float32Array(MAX_LIGHTS * 3),
       shockBuf: new Float32Array(MAX_SHOCKS * 4),
@@ -6216,31 +6243,46 @@ function initFX() {
 
 // (re)create the view-sized textures when VW changes
 function fxTargets(R) {
-  if (R.vw === VW) return;
+  if (R.vw === VW && R.vh === VH) return;
   const gl = R.gl;
   for (const t of [R.scene, R.ui]) if (t) gl.deleteTexture(t);
   for (const r of [R.lit, R.bloomA, R.bloomB]) if (r) { gl.deleteTexture(r.t); gl.deleteFramebuffer(r.fb); }
   R.scene = R.tex(VW, VH, gl.NEAREST); R.ui = R.tex(VW, VH, gl.LINEAR);
   R.lit = R.target(VW, VH); R.bloomA = R.target(VW / 2, VH / 2); R.bloomB = R.target(VW / 2, VH / 2);
-  R.vw = VW;
+  R.vw = VW; R.vh = VH;
 }
 // backing store follows the screen, capped by fxPerf.capMP megapixels of
 // fragment work; the CSS keeps object-fit: contain, so the aspect never changes
 const fxPerf = { ema: 16.7, slowT: 0, capMP: 2.4 };
 function fitView() {
-  const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
-  const vw = w > h ? clamp(Math.round(VH * w / h / 2) * 2, 480, 640) : 480;
-  if (vw === VW) return;
-  VW = vw;
+  // the space inside the safe-area padding, in device pixels
+  const dpr = window.devicePixelRatio || 1, bs = getComputedStyle(document.body);
+  const cssW = innerWidth - parseFloat(bs.paddingLeft) - parseFloat(bs.paddingRight);
+  const cssH = innerHeight - parseFloat(bs.paddingTop) - parseFloat(bs.paddingBottom);
+  const dw = Math.floor(cssW * dpr), dh = Math.floor(cssH * dpr);
+  let vw = 480, vh = 270, k = 0;
+  if (dw > dh && dh >= 200) {
+    k = Math.max(1, Math.ceil(dh / (COARSE ? 240 : 300)));
+    if (Math.floor(dh / k) < 200 && k > 1) k--;
+    vh = Math.floor(dh / k) & ~1; // even: the bloom pass runs at half size
+    vw = Math.min(640, Math.floor(dw / k) & ~1);
+    if (vw < 400) { k = 0; vw = 480; vh = 270; } // odd shapes: plain fit
+  }
+  // exact-multiple CSS size when we have one, else letterbox to fit
+  canvas.style.width = k ? vw * k / dpr + "px" : "";
+  canvas.style.height = k ? vh * k / dpr + "px" : "";
+  VIEW_K = k;
+  if (vw === VW && vh === VH) return;
+  VW = vw; VH = vh;
   sceneCanvas.width = uiCanvas.width = VW; sceneCanvas.height = uiCanvas.height = VH;
-  titleFloor = null;
+  titleFloor = null; logoCanvas = null;
   if (FXR) fxTargets(FXR);
 }
 function resizeFX() {
   fitView();
   if (!FXR) { canvas.width = VW; canvas.height = VH; return; }
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  let s = Math.min(window.innerWidth / VW, window.innerHeight / VH) * dpr;
+  let s = VIEW_K || Math.min(window.innerWidth / VW, window.innerHeight / VH) * dpr;
   s = Math.max(1, Math.min(s, Math.sqrt(fxPerf.capMP * 1e6 / (VW * VH))));
   canvas.width = Math.round(VW * s); canvas.height = Math.round(VH * s);
 }

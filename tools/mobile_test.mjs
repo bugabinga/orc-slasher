@@ -44,7 +44,8 @@ const tap = async (x, y) => { await touches("touchStart", [{ x, y, id: 1 }]); aw
 const rectMid = r => [r.x + r.w / 2, r.y + r.h / 2];
 const G_ = (f, a) => page.evaluate(f, a);
 
-check("wide view on a 20:9 phone", await G_(() => VW) > 480, await G_(() => "VW " + VW));
+check("crisp: whole device px per game px", await G_(() => VIEW_K > 0 && Math.abs(canvas.getBoundingClientRect().height * devicePixelRatio - VH * VIEW_K) < 1.5), await G_(() => `${VW}x${VH} @${VIEW_K}x`));
+check("phone gets a bigger UI (fewer rows)", await G_(() => VH < 250 && VW >= 400));
 check("atlas packed", await G_(() => atlasPages.length >= 1 && Object.entries(IMG).every(([n, i]) => i.atl || n === "font_atlas")), await G_(() => atlasPages.length + " page(s)"));
 await shot("title");
 await tap(240, 150);
@@ -141,7 +142,7 @@ if (car) {
   await tap(car[0], car[1]);
   check("tap car -> focused", await G_(() => !!focus.p && focus.p.dk === "car"));
   await wait(1500);
-  check("focused car takes fire", await G_(hp0 => !focus.p || focus.p.hp < hp0 || focus.p.state !== 0, car[2]));
+  check("focused car takes fire", await G_(hp0 => !focus.p || focus.p.hp < hp0 || focus.p.state !== 0, car[2]), await G_(() => focus.p ? `hp ${focus.p.hp.toFixed(0)} d ${Math.round(Math.hypot(focus.p.x - player.x, focus.p.y - player.y))} range ${player.stats.range} ammo ${player.ammo}` : "gone"));
 } else check("tap car -> focused", true, "skipped: no car in range on this map");
 
 check("all learned -> saved, no more hints", await G_(() => JSON.parse(localStorage.getItem("orcslasher_learned")).touch === LEARN_ALL && hint.cur === 0));

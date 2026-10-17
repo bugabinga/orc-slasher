@@ -27,7 +27,8 @@ offline, on desktop and phone.
 - **Pause:** P / Esc, or the ⏸ button top-right in combat
 - **Fullscreen:** the ⛶ button in the menu corner (or press F)
 
-**Phone** (landscape; the first tap goes fullscreen) — no virtual sticks:
+**Phone** (landscape; the first tap goes fullscreen; pixels stay crisp and
+text is drawn bigger on small screens) — no virtual sticks:
 
 - **Hold** anywhere: your hero runs toward your finger
 - **Tap** the street: walk there · **tap a zombie, car or barrel**: lock
