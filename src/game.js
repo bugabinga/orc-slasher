@@ -11,7 +11,7 @@ ctx.imageSmoothingEnabled = false;
 const VW = canvas.width, VH = canvas.height;
 
 const TILE = 16;
-const MAP_W = 120, MAP_H = 80;
+const MAP_W = 240, MAP_H = 160;
 const WORLD_W = MAP_W * TILE, WORLD_H = MAP_H * TILE;
 const FINAL_WAVE = 10;
 
@@ -619,7 +619,7 @@ const inRock = (x, y) => {
 let flowDist = null, flowQ = null, flowT = 0;
 function updateFlow() {
   const N = MAP_W * MAP_H;
-  if (!flowDist || flowDist.length !== N) { flowDist = new Int16Array(N); flowQ = new Int32Array(N); }
+  if (!flowDist || flowDist.length !== N) { flowDist = new Int32Array(N); flowQ = new Int32Array(N); }
   flowDist.fill(-1);
   const s = tileAt(player.x, player.y);
   let head = 0, tail = 0;
@@ -1943,7 +1943,7 @@ let pauseBtnRect = null, fsPauseRect = null, invRects = [];
 
 // city map, bottom-left: you (white), the horde (red), the King (gold)
 function renderMinimap() {
-  const s = 0.6, w = Math.round(MAP_W * s), h = Math.round(MAP_H * s);
+  const s = 96 / MAP_W, w = Math.round(MAP_W * s), h = Math.round(MAP_H * s);
   const x0 = 6, y0 = VH - h - 6;
   ctx.globalAlpha = 0.8;
   ctx.drawImage(miniCanvas, x0, y0, w, h);

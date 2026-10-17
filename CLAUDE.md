@@ -70,7 +70,7 @@ src/game.js` before building.
   by `rollRarity(luck)`; pick 1-of-3 per banked level; `META.wpn` weapon
   levels bought via `tryUpgradeWeapon` on the select screen; shop
   spends `G.coins` (reroll/heal/extra pick), leave via NEXT WAVE
-- **Map** (`buildMap`) — random abandoned city, 120×80 tiles: road grid
+- **Map** (`buildMap`) — random abandoned city, 240×160 tiles: road grid
   (`vx`/`hy`), blocks of buildings / parks / lots, east plaza with the
   King. Buildings are `solidGrid` tiles; cars, barrels, lamps, trees are
   `props` (drawn live, y-sorted) whose rects sit in `propGrid` per tile.
