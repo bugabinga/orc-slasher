@@ -4430,11 +4430,12 @@ function renderTitle(t) {
   ctx.globalCompositeOperation = "source-over";
   // three skyline layers, nearer = darker and faster
   const layers = [[0.04, "#140c1a", 70, 40, 0.5], [0.1, "#0e0814", 55, 60, 0.35], [0.22, "#07050c", 35, 46, 0]];
+  const hs = clamp((VH - 130) / 140, 0.6, 1); // short screens: lower towers, so the moon stays in open sky
   for (let L = 0; L < 3; L++) {
     const [spd, col, hMin, hVar, lit] = layers[L];
     const off = (t * spd * 60) % 600;
     for (let k = 0, bx = -off; bx < VW + 40; k++) {
-      const w = 22 + (k * 37 + L * 11) % 34, h = hMin + (k * 53 + L * 29) % hVar, top = VH - 62 - h + L * 8;
+      const w = 22 + (k * 37 + L * 11) % 34, h = Math.round((hMin + (k * 53 + L * 29) % hVar) * hs), top = VH - 62 - h + L * 8;
       ctx.fillStyle = col; ctx.fillRect(Math.round(bx), top, w, h);
       if (lit) for (let wy = top + 5; wy < VH - 66; wy += 7) for (let wx = bx + 3; wx < bx + w - 3; wx += 5) {
         const on = ((Math.round(wx + off) * 7 + wy * 13 + k * 3 + L) % 29) === 0;
