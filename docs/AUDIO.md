@@ -1,9 +1,14 @@
-# Libre audio candidates for Orc Slasher
+# Libre audio for Zombie Blaster
 
-Currently all audio is synthesized at runtime (WebAudio): tiny SFX beeps and
-the ambient cave loop in `src/game.js`. These libre packs are vetted
-replacements/upgrades that fit the dark-cave orc theme. Nothing here is
-integrated yet — this is the shortlist.
+**Integrated** (`assets/sounds/`, built by `tools/build_sounds.py`, bundled
+as `window.SOUNDS`, played with `sample()` / `sampleAt()` in `src/game.js`):
+
+- Zombies Sound Pack — artisticdude, CC0 — groans, deaths, boss roar
+- Residue SFX — Planet Killer Games, CC0 — explosion, empty clip, spit, medkit
+
+Gunshots, UI beeps and the ambient loop are still synthesized (WebAudio).
+The older shortlist below was vetted for the original orc/cave theme and is
+kept for reference.
 
 ## SFX
 

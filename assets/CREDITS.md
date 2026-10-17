@@ -53,6 +53,18 @@ keeps its source name and replaces it at build time. Licenses follow the
 source frame: 0x72 / original art stays CC0, CraftPix-derived frames stay
 under the CraftPix license.
 
+## assets/sounds/ — CC0 sound effects
+
+Encoded to small mono MP3s by `tools/build_sounds.py` from:
+
+- **Zombies Sound Pack** by artisticdude (CC0) —
+  https://opengameart.org/content/zombies-sound-pack → `groan_*`, `zdie_*`, `zboss`
+- **Residue SFX** by Planet Killer Games (CC0; "visit my website":
+  http://www.planetkillergames.net/) —
+  https://opengameart.org/content/residue-sfx → `boom`, `clip`, `spit`, `heal`
+
+Gunshots and UI beeps are still synthesized live (WebAudio).
+
 ## Downloaded but currently unused
 
 - Kenney "Tiny Dungeon" (CC0) — https://kenney.nl/assets/tiny-dungeon

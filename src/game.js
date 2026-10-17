@@ -93,6 +93,7 @@ function audio() {
   if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
   if (AC.state === "suspended") AC.resume();
   startMusic();
+  loadSamples();
   return AC;
 }
 
@@ -158,6 +159,43 @@ function noise(dur, vol, freq = 1800) {
     src.start(); src.stop(ac.currentTime + dur);
   } catch (e) { /* audio unavailable */ }
 }
+// sampled sounds (CC0 packs, bundled as window.SOUNDS), decoded once the
+// audio context exists; sample() returns false until then so callers can
+// fall back to the synth
+const SAMPLES = {};
+let samplesLoading = false;
+function loadSamples() {
+  if (samplesLoading || !AC || !window.SOUNDS) return;
+  samplesLoading = true;
+  for (const [name, uri] of Object.entries(window.SOUNDS)) {
+    const bin = atob(uri.slice(uri.indexOf(",") + 1)), buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    AC.decodeAudioData(buf.buffer).then(b => { SAMPLES[name] = b; }, () => { /* undecodable: synth fallback */ });
+  }
+}
+function sample(name, vol, rate = 1, pan = 0) {
+  const b = SAMPLES[name];
+  if (!SND.sfx || !AC || !b) return false;
+  try {
+    const src = AC.createBufferSource(), g = AC.createGain();
+    src.buffer = b; src.playbackRate.value = rate; g.gain.value = vol;
+    src.connect(g);
+    if (pan && AC.createStereoPanner) {
+      const pn = AC.createStereoPanner();
+      pn.pan.value = clamp(pan, -1, 1);
+      g.connect(pn).connect(AC.destination);
+    } else g.connect(AC.destination);
+    src.start();
+  } catch (e) { return false; }
+  return true;
+}
+// a sound at a world position: quieter with distance, panned left/right
+function sampleAt(name, x, y, vol, rate = 1) {
+  if (!player) return sample(name, vol, rate);
+  const d = Math.hypot(x - player.x, y - player.y);
+  return sample(name, vol * clamp(1.2 - d / 320, 0, 1), rate, (x - player.x) / 260);
+}
+
 let lastShotSfx = 0;
 function gunSfx(kind) {
   const now = performance.now();
@@ -175,12 +213,12 @@ const SFX = {
   gem: () => beep(880, 0.07, "sine", 0.07, 240),
   coinS: () => beep(1180, 0.06, "sine", 0.05, 120),
   hurt: () => beep(90, 0.25, "square", 0.1, -50),
-  boom: () => { noise(0.5, 0.16, 520); beep(60, 0.35, "sawtooth", 0.12, -30); },
+  boom: () => { if (!sample("boom", 0.6, rnd(0.85, 1.1))) { noise(0.5, 0.16, 520); beep(60, 0.35, "sawtooth", 0.12, -30); } },
   reload: () => { beep(620, 0.04, "square", 0.04); setTimeout(() => beep(880, 0.05, "square", 0.04), 110); },
   level: () => { beep(520, 0.09, "square", 0.06); setTimeout(() => beep(660, 0.09, "square", 0.06), 90); setTimeout(() => beep(880, 0.14, "square", 0.06), 180); },
   card: () => beep(440, 0.08, "triangle", 0.08, 100),
   dash: () => beep(300, 0.1, "sine", 0.05, 300),
-  bossRoar: () => beep(55, 0.6, "sawtooth", 0.12, -20),
+  bossRoar: () => { if (!sample("zboss", 0.7, rnd(0.7, 0.85))) beep(55, 0.6, "sawtooth", 0.12, -20); },
   waveClear: () => { beep(392, 0.12, "triangle", 0.08); setTimeout(() => beep(523, 0.12, "triangle", 0.08), 120); setTimeout(() => beep(784, 0.2, "triangle", 0.08), 240); },
 };
 
@@ -805,7 +843,7 @@ function flowDir(e) {
 // ------------------------------------------------------------------ state --
 const G = {
   state: "title", // title | play | campfire | gameover | victory
-  t: 0, wave: 0, kills: 0, coins: 0, shake: 0, hitPause: 0,
+  t: 0, wave: 0, kills: 0, coins: 0, shake: 0, hitPause: 0, groanT: 0,
   endless: false,
   cls: "marine", weapon: "rifle",
   cam: { x: 0, y: 0 },
@@ -1332,7 +1370,8 @@ function damageEnemy(e, dmg, crit) {
 function killEnemy(e) {
   e.dead = true;
   G.kills++;
-  SFX.die();
+  if (Math.random() < 0.35) sampleAt("zdie_" + irnd(0, 3), e.x, e.y, 0.35, rnd(0.85, 1.2));
+  else SFX.die();
   if (e.dirAnim) fx.push({ kind: "corpse", anim: e.dirSet.death, x: e.x, y: e.y, life: 0.7, max: 0.7 });
   for (let i = 0; i < (e.big ? 14 : 6); i++) {
     fx.push({ kind: "blood", x: e.x, y: e.y - 6, vx: rnd(-60, 60), vy: rnd(-90, 10), life: rnd(0.3, 0.7), max: 0.7 });
@@ -1401,6 +1440,7 @@ function fireGun() {
   if (player.ammo <= 0) {
     player.reloadT = w.reload * st.reloadMul;
     texts.push({ x: player.x, y: player.y - 28, s: "reloading…", life: 1, col: "#ffd166" });
+    sample("clip", 0.5);
   }
 }
 
@@ -1596,6 +1636,7 @@ function updatePlay(dt) {
           const off = (i - (n - 1) / 2) * 0.26;
           bolts.push({ x: e.x, y: e.y - 8, vx: Math.cos(a + off) * 95, vy: Math.sin(a + off) * 95, t: 0, dmg: e.dmg });
         }
+        sampleAt("spit", e.x, e.y, 0.4, rnd(0.9, 1.15));
       }
     }
     if (e.boss) {
@@ -1746,10 +1787,17 @@ function updatePlay(dt) {
     {
       player.hp = Math.min(st.maxHp, player.hp + st.maxHp * 0.3);
       texts.push({ x: player.x, y: player.y - 26, s: "+" + big(st.maxHp * 0.3), life: 1, col: "#ff6b6b" });
-      SFX.gem();
+      if (!sample("heal", 0.45)) SFX.gem();
     }
   }
   flasks.length = w;
+
+  // -- the horde groans: a random nearby zombie, more often in a crowd
+  if ((G.groanT -= dt) <= 0 && enemies.length) {
+    const e = enemies[irnd(0, enemies.length - 1)];
+    if (!e.dead && e.warmup <= 0 && dist(e, player) < 320) sampleAt("groan_" + irnd(0, 9), e.x, e.y, e.big ? 0.5 : 0.32, e.big ? rnd(0.6, 0.75) : rnd(0.85, 1.15));
+    G.groanT = rnd(0.7, 2.4) / (1 + Math.min(enemies.length, 60) / 30);
+  }
 
   // -- the king bleeds
   if (kingPos) {

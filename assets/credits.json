@@ -38,15 +38,29 @@
       "heading": "SOUND",
       "entries": [
         {
+          "name": "artisticdude",
+          "work": "Zombies Sound Pack — every groan, gurgle and death rattle of the horde",
+          "license": "CC0",
+          "url": "opengameart.org/content/zombies-sound-pack",
+          "thanks": "the city sounds properly dead now."
+        },
+        {
+          "name": "Planet Killer Games",
+          "work": "Residue SFX — explosions, the empty clip, acid spit and the medkit",
+          "license": "CC0",
+          "url": "planetkillergames.net",
+          "thanks": "boom, but better."
+        },
+        {
           "name": "WebAudio synth",
-          "work": "every gunshot, explosion, gem and the ambient cave loop — generated live, no files",
+          "work": "every gunshot, beep and the ambient night loop — generated live",
           "license": "original",
           "url": "",
           "thanks": "four oscillators in a trench coat."
         },
         {
           "name": "OpenGameArt community",
-          "work": "researched CC0 packs by Juhani Junkala, rubberduck & friends (see docs/AUDIO.md)",
+          "work": "the home of the CC0 packs above (more in docs/AUDIO.md)",
           "license": "CC0 / CC-BY",
           "url": "opengameart.org",
           "thanks": "a treasure cave of libre sound, waiting for our next update."
