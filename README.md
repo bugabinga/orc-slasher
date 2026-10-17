@@ -54,7 +54,10 @@ littered with burnt-out wrecks and roadblocks, sidewalks under flickering
 streetlights (a quarter of them dead), brick and concrete blocks, dead parks
 and rubble lots. The dead climb out of **manholes** and burst through
 **doorways** just beyond your sight. Somewhere in the east plaza hangs the
-King — the gold dot on the minimap (bottom-left) shows where.
+King — the radar (bottom-left) shows him as a gold dot, or a gold arrow
+on its rim pointing the way. The city is enormous (4096×4096 tiles, about
+65 000 px each way) yet it's built on the fly around you, so it starts
+instantly and runs as smoothly as a small map.
 
 Over a dozen kinds of zombie hunt you, from crawler swarms to frozen
 corpses, stalkers, acid spitters and armored gorehulks. **Every 5th wave a

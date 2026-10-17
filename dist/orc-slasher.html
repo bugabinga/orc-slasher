@@ -1318,7 +1318,7 @@ ctx.imageSmoothingEnabled = false;
 const VW = canvas.width, VH = canvas.height;
 
 const TILE = 16;
-const MAP_W = 240, MAP_H = 160;
+const MAP_W = 4096, MAP_H = 4096; // virtual: any size works, cost follows the view
 const WORLD_W = MAP_W * TILE, WORLD_H = MAP_H * TILE;
 const FINAL_WAVE = 10;
 
@@ -1575,317 +1575,384 @@ function animFrame(list, t, fps = 8) {
 }
 
 // ------------------------------------------------------------------- map ---
-// an abandoned city: a grid of 4-lane roads with sidewalks; the blocks
-// between them hold buildings (solid), dead parks and rubble lots, and
-// wrecks litter the streets. Solids live in a tile grid (buildings) plus
-// per-tile lists of prop rects (cars, barrels, trees…)
+// A virtual abandoned city of any size: nothing is stored for the whole map.
+// Roads are two sorted lists of positions; the city is cut into "cells"
+// (one block plus the road west and north of it), and each cell is generated
+// on demand from the run seed and cached. The floor is painted lazily in
+// 256px chunks, the flow field covers only a window around the player, and
+// the minimap is a local radar. Memory and per-frame cost follow the view,
+// not MAP_W/MAP_H.
 const T_BLD = 0, T_ROAD = 1, T_WALK = 2, T_LOT = 3, T_GRASS = 4, T_PLAZA = 5;
-let floorCanvas = null, miniCanvas = null;
-let solidGrid = null, propGrid = null, walkGrid = null;
-let props = [];       // y-sorted, drawn live: { img, x, y (feet), flip, rect, fire, fireY }
-let lamps = [], spawnSpots = [], kingPos = null, startPos = null;
+const EDGE = 2;           // the outermost tiles are a ring of buildings
+const CHUNK = 16;         // floor chunk side, in tiles
+const CELL_CAP = 900, CHUNK_CAP = 60;
+const EMPTY = [];
+const EDGE_BLD = { wall: "concrete", roof: 0, doors: new Set() };
+let SEED = 1, roadX = [], roadY = [], startPos = null, kingPos = null, kingCell = null;
+const cellCache = new Map(), chunkCache = new Map();
+let mapStamp = 0; // bumped every frame; caches evict the least recently used
 
-const tileAt = (x, y) => clamp(Math.floor(y / TILE), 0, MAP_H - 1) * MAP_W + clamp(Math.floor(x / TILE), 0, MAP_W - 1);
+// deterministic randomness: same seed + same coordinates = same city
+function hash3(a, b, c) {
+  let h = (SEED ^ Math.imul(a, 0x27d4eb2d) ^ Math.imul(b, 0x165667b1) ^ Math.imul(c, 0x9e3779b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function mulberry(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// index of the cell column/row holding tile t = how many roads start at or before it
+function upperBound(arr, t) {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= t) lo = m + 1; else hi = m; }
+  return lo;
+}
+const colOf = tx => upperBound(roadX, tx), rowOf = ty => upperBound(roadY, ty);
+const inVRoad = tx => { const c = colOf(tx); return c > 0 && tx < roadX[c - 1] + 4; };
+const inHRoad = ty => { const r = rowOf(ty); return r > 0 && ty < roadY[r - 1] + 4; };
+const walkCol = tx => { const c = colOf(tx); return (c > 0 && tx === roadX[c - 1] + 4) || (c < roadX.length && tx === roadX[c] - 1); };
+const walkRow = ty => { const r = rowOf(ty); return (r > 0 && ty === roadY[r - 1] + 4) || (r < roadY.length && ty === roadY[r] - 1); };
 
 function buildMap() {
-  props = []; lamps = []; spawnSpots = [];
-  const N = MAP_W * MAP_H;
-  const T = new Uint8Array(N).fill(T_LOT);
-  const bid = new Int16Array(N).fill(-1); // building id per tile; -2 = city edge
-  const at = (tx, ty) => ty * MAP_W + tx;
-  const EDGE = 2;
+  SEED = (Math.random() * 4294967296) >>> 0;
+  cellCache.clear(); chunkCache.clear();
+  const R = mulberry(hash3(1, 2, 3));
+  roadX = []; roadY = [];
+  for (let x = 7 + Math.floor(R() * 4); x < MAP_W - 12; x += 17 + Math.floor(R() * 7)) roadX.push(x);
+  for (let y = 6 + Math.floor(R() * 3); y < MAP_H - 10; y += 13 + Math.floor(R() * 5)) roadY.push(y);
+  // start on the crossroads nearest the middle; the King hangs a few blocks east
+  const ci = clamp(upperBound(roadX, MAP_W / 2) - 1, 0, roadX.length - 1);
+  const cj = clamp(upperBound(roadY, MAP_H / 2) - 1, 0, roadY.length - 1);
+  startPos = { x: (roadX[ci] + 2) * TILE, y: (roadY[cj] + 2) * TILE };
+  kingPos = null;
+  for (let k = 4; !kingPos && k < 12; k++) { // first block big enough for a plaza
+    kingCell = { ci: Math.min(ci + k, roadX.length), cj: Math.min(cj + 1, roadY.length) };
+    cellCache.clear();
+    kingPos = getCell(kingCell.ci, kingCell.cj).king;
+  }
+}
 
-  // road grid
-  const vx = [], hy = [];
-  for (let x = irnd(7, 10); x < MAP_W - 12; x += irnd(17, 23)) vx.push(x);
-  for (let y = irnd(6, 8); y < MAP_H - 10; y += irnd(13, 17)) hy.push(y);
-  const inV = tx => vx.some(x => tx >= x && tx <= x + 3);
-  const inH = ty => hy.some(y => ty >= y && ty <= y + 3);
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      const i = at(tx, ty);
+function getCell(ci, cj) {
+  const key = ci * 65536 + cj;
+  let c = cellCache.get(key);
+  if (!c) {
+    if (cellCache.size >= CELL_CAP) evict(cellCache, CELL_CAP / 4);
+    c = genCell(ci, cj);
+    cellCache.set(key, c);
+  }
+  c.stamp = mapStamp;
+  return c;
+}
+function evict(cache, n) {
+  const old = [...cache.entries()].sort((a, b) => a[1].stamp - b[1].stamp);
+  for (let i = 0; i < n && i < old.length; i++) cache.delete(old[i][0]);
+}
+const cellAt = (tx, ty) => getCell(colOf(tx), rowOf(ty));
+const oob = (tx, ty) => tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H;
+function tileType(tx, ty) {
+  if (oob(tx, ty)) return T_BLD;
+  const c = cellAt(tx, ty);
+  return c.T[(ty - c.y0) * c.w + tx - c.x0];
+}
+function buildingAt(tx, ty) {
+  if (oob(tx, ty)) return EDGE_BLD;
+  const c = cellAt(tx, ty), b = c.bid[(ty - c.y0) * c.w + tx - c.x0];
+  return b === -2 ? EDGE_BLD : b >= 0 ? c.buildings[b] : null;
+}
+function walkAt(tx, ty) {
+  if (oob(tx, ty)) return 0;
+  const c = cellAt(tx, ty);
+  return c.walk[(ty - c.y0) * c.w + tx - c.x0];
+}
+function rectsAt(tx, ty) {
+  if (oob(tx, ty)) return EMPTY;
+  const c = cellAt(tx, ty);
+  return c.pg[(ty - c.y0) * c.w + tx - c.x0] || EMPTY;
+}
+
+// one block + its west and north road, fully self-contained: every prop
+// rect stays inside the cell, so collision never has to look next door
+function genCell(ci, cj) {
+  const R = mulberry(hash3(ci, cj, 7));
+  const ri = (a, b) => a + Math.floor(R() * (b - a + 1)), rf = (a, b) => a + R() * (b - a);
+  const rp = arr => arr[Math.floor(R() * arr.length)];
+  const x0 = ci ? roadX[ci - 1] : 0, x1 = (ci < roadX.length ? roadX[ci] : MAP_W) - 1;
+  const y0 = cj ? roadY[cj - 1] : 0, y1 = (cj < roadY.length ? roadY[cj] : MAP_H) - 1;
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const T = new Uint8Array(w * h).fill(T_LOT), bid = new Int16Array(w * h).fill(-1);
+  const L = (tx, ty) => (ty - y0) * w + tx - x0;
+  const inCell = (tx, ty) => tx >= x0 && tx <= x1 && ty >= y0 && ty <= y1;
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const i = L(tx, ty);
       if (tx < EDGE || ty < EDGE || tx >= MAP_W - EDGE || ty >= MAP_H - EDGE) { T[i] = T_BLD; bid[i] = -2; }
-      else if (inV(tx) || inH(ty)) T[i] = T_ROAD;
-      else if (vx.some(x => tx === x - 1 || tx === x + 4) || hy.some(y => ty === y - 1 || ty === y + 4)) T[i] = T_WALK;
+      else if ((ci && tx < x0 + 4) || (cj && ty < y0 + 4)) T[i] = T_ROAD;
+      else if ((ci && tx === x0 + 4) || (ci < roadX.length && tx === x1) || (cj && ty === y0 + 4) || (cj < roadY.length && ty === y1)) T[i] = T_WALK;
     }
   }
-  // the player starts on the crossroads nearest the middle
-  let best = 1e9;
-  for (const x of vx) for (const y of hy) {
-    const d = Math.hypot(x + 2 - MAP_W / 2, y + 2 - MAP_H / 2);
-    if (d < best) { best = d; startPos = { x: (x + 2) * TILE, y: (y + 2) * TILE }; }
-  }
-  const nearStart = (x, y, r) => Math.hypot(x - startPos.x, y - startPos.y) < r;
-
-  // blocks: the rectangles between the sidewalks
-  const cols = [], rows = [];
-  for (let i = 0; i <= vx.length; i++) cols.push([i ? vx[i - 1] + 5 : EDGE, i < vx.length ? vx[i] - 2 : MAP_W - EDGE - 1]);
-  for (let i = 0; i <= hy.length; i++) rows.push([i ? hy[i - 1] + 5 : EDGE, i < hy.length ? hy[i] - 2 : MAP_H - EDGE - 1]);
-  const blocks = [];
-  for (const [x0, x1] of cols) for (const [y0, y1] of rows) if (x1 - x0 >= 2 && y1 - y0 >= 2) blocks.push({ x0, x1, y0, y1 });
-  // the King hangs in a plaza on the east side
-  let kingBlock = null; best = 1e9;
-  for (const b of blocks) {
-    const d = Math.hypot((b.x0 + b.x1) / 2 - MAP_W * 0.82, (b.y0 + b.y1) / 2 - MAP_H / 2);
-    if (d < best && b.x1 - b.x0 >= 5 && b.y1 - b.y0 >= 5) { best = d; kingBlock = b; }
-  }
-
-  const buildings = [];
-  const WALL_STYLES = ["brick", "concrete", "beige"];
-  function addBuilding(x0, x1, y0, y1) {
-    const id = buildings.length;
-    const w = x1 - x0 + 1, doors = new Set([x0 + irnd(1, Math.max(1, w - 2))]);
-    if (w >= 7 && Math.random() < 0.5) doors.add(x0 + irnd(1, w - 2));
-    buildings.push({ x0, x1, y0, y1, wall: pick(WALL_STYLES), roof: irnd(0, 2), doors });
-    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) { T[at(tx, ty)] = T_BLD; bid[at(tx, ty)] = id; }
-  }
-  function buildingRow(b, y0, y1) {
-    let x = b.x0;
-    while (x <= b.x1) {
-      let w = irnd(4, 8);
-      if (b.x1 - (x + w - 1) < 4) w = b.x1 - x + 1; // swallow a sliver too thin to build on
-      const yb = y1 - (Math.random() < 0.25 ? 1 : 0); // some stand back from the street
-      if (yb - y0 >= 2) addBuilding(x, x + w - 1, y0, yb);
-      x += w;
-      if (x <= b.x1 - 4 && Math.random() < 0.3) x++; // alley
-    }
-  }
-  const fillType = (b, t) => { for (let ty = b.y0; ty <= b.y1; ty++) for (let tx = b.x0; tx <= b.x1; tx++) T[at(tx, ty)] = t; };
-  const kinds = [];
-  for (const b of blocks) {
-    if (b === kingBlock) { fillType(b, T_PLAZA); kinds.push("plaza"); continue; }
-    const r = Math.random();
-    if (r < 0.68 && b.x1 - b.x0 >= 3 && b.y1 - b.y0 >= 3) {
-      if (b.y1 - b.y0 >= 10 && Math.random() < 0.55) { // two rows facing a back alley
-        const mid = Math.floor((b.y0 + b.y1) / 2);
-        buildingRow(b, b.y0, mid - 1);
-        buildingRow(b, mid + 1, b.y1);
-      } else buildingRow(b, b.y0, b.y1);
-      kinds.push("bld");
-    } else if (r < 0.84) { fillType(b, T_GRASS); kinds.push("park"); }
-    else kinds.push("lot");
-  }
-  solidGrid = new Uint8Array(N);
-  for (let i = 0; i < N; i++) solidGrid[i] = T[i] === T_BLD ? 1 : 0;
-  const walkable = (tx, ty) => tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H && T[at(tx, ty)] !== T_BLD;
-
-  // ---- props (solid ones also go into propGrid)
-  const free = (x, y, w, h, pad = 3) => {
-    for (let ty = Math.floor((y - pad) / TILE); ty <= Math.floor((y + h + pad) / TILE); ty++) {
-      for (let tx = Math.floor((x - pad) / TILE); tx <= Math.floor((x + w + pad) / TILE); tx++) if (!walkable(tx, ty)) return false;
-    }
-    return !props.some(p => p.rect && x < p.rect.x + p.rect.w + pad && x + w + pad > p.rect.x && y < p.rect.y + p.rect.h + pad && y + h + pad > p.rect.y);
+  const block = {
+    x0: ci ? x0 + 5 : EDGE, x1: ci < roadX.length ? x1 - 1 : MAP_W - EDGE - 1,
+    y0: cj ? y0 + 5 : EDGE, y1: cj < roadY.length ? y1 - 1 : MAP_H - EDGE - 1,
   };
-  // rect: footprint relative to the feet point
-  function addProp(img, x, y, rect, extra = {}) {
-    const r = rect ? { x: x + rect[0], y: y + rect[1], w: rect[2], h: rect[3] } : null;
-    if (r && (!free(r.x, r.y, r.w, r.h) || (r.w > 8 && nearStart(x, y, 7 * TILE)))) return null; // keep the start clear of wrecks
-    const p = { img, x, y, rect: r, flip: false, t: rnd(0, 9), ...extra };
-    props.push(p);
+  const cell = { ci, cj, x0, y0, x1, y1, w, h, T, bid, buildings: [], props: [], lamps: [], spawns: [], manholes: [], king: null, stamp: 0 };
+  const bw = block.x1 - block.x0, bh = block.y1 - block.y0;
+  const isKing = kingCell && ci === kingCell.ci && cj === kingCell.cj && bw >= 2 && bh >= 2;
+  let kind = "lot";
+  const fill = t => { for (let ty = block.y0; ty <= block.y1; ty++) for (let tx = block.x0; tx <= block.x1; tx++) T[L(tx, ty)] = t; };
+  const WALL_STYLES = ["brick", "concrete", "beige"];
+  function addBuilding(bx0, bx1, by0, by1) {
+    const id = cell.buildings.length, bwid = bx1 - bx0 + 1;
+    const doors = new Set([bx0 + ri(1, Math.max(1, bwid - 2))]);
+    if (bwid >= 7 && R() < 0.5) doors.add(bx0 + ri(1, bwid - 2));
+    cell.buildings.push({ wall: rp(WALL_STYLES), roof: ri(0, 2), doors });
+    for (let ty = by0; ty <= by1; ty++) for (let tx = bx0; tx <= bx1; tx++) { T[L(tx, ty)] = T_BLD; bid[L(tx, ty)] = id; }
+    for (const d of doors) if (by1 + 1 <= y1 && T[L(d, by1 + 1)] !== T_BLD) cell.spawns.push({ x: d * TILE + 8, y: (by1 + 1) * TILE + 8 });
+  }
+  function buildingRow(by0, by1) {
+    let x = block.x0;
+    while (x <= block.x1) {
+      let bwid = ri(4, 8);
+      if (block.x1 - (x + bwid - 1) < 4) bwid = block.x1 - x + 1; // swallow a sliver too thin to build on
+      const yb = by1 - (R() < 0.25 ? 1 : 0); // some stand back from the street
+      if (yb - by0 >= 2) addBuilding(x, x + bwid - 1, by0, yb);
+      x += bwid;
+      if (x <= block.x1 - 4 && R() < 0.3) x++; // alley
+    }
+  }
+  if (bw >= 2 && bh >= 2) {
+    const r = R();
+    if (isKing) { fill(T_PLAZA); kind = "plaza"; }
+    else if (r < 0.68 && bw >= 3 && bh >= 3) {
+      kind = "bld";
+      if (bh >= 10 && R() < 0.55) { // two rows facing a back alley
+        const mid = Math.floor((block.y0 + block.y1) / 2);
+        buildingRow(block.y0, mid - 1); buildingRow(mid + 1, block.y1);
+      } else buildingRow(block.y0, block.y1);
+    } else if (r < 0.84) { fill(T_GRASS); kind = "park"; }
+  }
+
+  // ---- props (feet + footprint relative to the feet; footprints stay in the cell)
+  const walkable = (tx, ty) => inCell(tx, ty) && T[L(tx, ty)] !== T_BLD;
+  const free = (x, y, rw, rh, pad = 3) => {
+    for (let ty = Math.floor((y - pad) / TILE); ty <= Math.floor((y + rh + pad) / TILE); ty++) {
+      for (let tx = Math.floor((x - pad) / TILE); tx <= Math.floor((x + rw + pad) / TILE); tx++) if (!walkable(tx, ty)) return false;
+    }
+    return !cell.props.some(p => p.rect && x < p.rect.x + p.rect.w + pad && x + rw + pad > p.rect.x && y < p.rect.y + p.rect.h + pad && y + rh + pad > p.rect.y);
+  };
+  const nearStart = (x, y) => Math.hypot(x - startPos.x, y - startPos.y) < 7 * TILE;
+  function addProp(img, x, y, rect, extra) {
+    const rr = rect ? { x: x + rect[0], y: y + rect[1], w: rect[2], h: rect[3] } : null;
+    if (rr && (!free(rr.x, rr.y, rr.w, rr.h) || (rr.w > 8 && nearStart(x, y)))) return null; // keep the start clear of wrecks
+    const p = { img, x, y, rect: rr, flip: false, t: rf(0, 9), ...extra };
+    cell.props.push(p);
     return p;
   }
+  const fire = p => { if (p) { p.fire = true; p.fireY = p.img === "city_firebarrel" ? 12 : p.fireY; } return p; };
   const CAR_COLORS = ["red", "blue", "white", "green", "rust", "rust", "burnt"];
   const car = (x, y, vertical) => {
-    const col = pick(CAR_COLORS);
+    const col = rp(CAR_COLORS);
     const p = vertical
-      ? addProp(`city_car_v_${col}`, x, y, [-8, -28, 16, 26])
-      : addProp(`city_car_h_${col}`, x, y, [-15, -14, 30, 12], { flip: Math.random() < 0.5 });
-    if (p && col === "burnt" && Math.random() < 0.6) { p.fire = true; p.fireY = vertical ? 18 : 12; }
+      ? addProp(`city_car_v_${col}`, x, y, [-8, -28, 16, 26], { fireY: 18 })
+      : addProp(`city_car_h_${col}`, x, y, [-15, -14, 30, 12], { flip: R() < 0.5, fireY: 12 });
+    if (p && col === "burnt" && R() < 0.6) fire(p);
   };
-  // wrecks on the roads
-  for (const x of vx) {
-    for (let ty = EDGE; ty < MAP_H - EDGE; ty += irnd(5, 11)) {
-      if (inH(ty) || inH(ty - 2)) continue;
-      car((x + (Math.random() < 0.5 ? 1 : 3)) * TILE, ty * TILE + rnd(0, 8), true);
-    }
-  }
-  for (const y of hy) {
-    for (let tx = EDGE; tx < MAP_W - EDGE; tx += irnd(5, 11)) {
-      if (inV(tx) || inV(tx + 1)) continue;
-      car(tx * TILE + rnd(0, 8), (y + (Math.random() < 0.5 ? 2 : 4)) * TILE - 2, false);
-    }
-  }
-  // roadblocks: a jersey barrier half across some street segments
-  for (let i = 0; i < Math.round(vx.length * hy.length * 0.6); i++) {
-    if (Math.random() < 0.5) {
-      const x = pick(vx), ty = irnd(EDGE + 2, MAP_H - EDGE - 3);
-      if (!inH(ty)) addProp("city_barricade", (x + (Math.random() < 0.5 ? 1 : 3)) * TILE, ty * TILE, [-15, -8, 30, 7]);
-    } else {
-      const y = pick(hy), tx = irnd(EDGE + 2, MAP_W - EDGE - 3);
-      if (!inV(tx)) addProp("city_barricade", tx * TILE, (y + 2) * TILE + (Math.random() < 0.5 ? 0 : 16), [-15, -8, 30, 7]);
-    }
-  }
-  // streetlights along every sidewalk, a quarter of them dead
+  const barrel = (x, y) => {
+    const p = addProp(R() < 0.5 ? "city_firebarrel" : rp(["city_barrel", "city_barrel_blue"]), x, y, [-5, -6, 10, 6]);
+    if (p && p.img === "city_firebarrel") fire(p);
+  };
   const lamp = (tx, ty, flip) => {
     if (!walkable(tx, ty)) return;
     const x = tx * TILE + 8, y = ty * TILE + 14;
     const p = addProp("city_lamp", x, y, [-2, -3, 4, 3], { flip });
     if (!p) return;
-    const broken = Math.random() < 0.25;
-    if (broken) p.img = "city_lamp_broken";
-    else lamps.push({ x: x + (flip ? -7 : 7), y: y - 10, flicker: Math.random() < 0.15, t: rnd(0, 9) });
+    if (R() < 0.25) p.img = "city_lamp_broken";
+    else cell.lamps.push({ x: x + (flip ? -7 : 7), y: y - 10, flicker: R() < 0.15, t: rf(0, 9) });
   };
-  for (const x of vx) for (let ty = EDGE + 2; ty < MAP_H - EDGE - 1; ty += 6) {
-    if (inH(ty) || inH(ty + 1) || inH(ty - 1)) continue;
-    lamp(x - 1, ty, false); lamp(x + 4, ty + 3, true);
-  }
-  for (const y of hy) for (let tx = EDGE + 3; tx < MAP_W - EDGE - 1; tx += 7) {
-    if (inV(tx) || inV(tx + 1) || inV(tx - 1)) continue;
-    lamp(tx, y - 1, Math.random() < 0.5); lamp(tx + 3, y + 4, Math.random() < 0.5);
-  }
-  // block fillings
-  const spotIn = b => ({ x: rnd(b.x0 * TILE + 10, (b.x1 + 1) * TILE - 10), y: rnd(b.y0 * TILE + 16, (b.y1 + 1) * TILE - 4) });
-  blocks.forEach((b, k) => {
-    const area = (b.x1 - b.x0 + 1) * (b.y1 - b.y0 + 1);
-    if (kinds[k] === "park") {
-      for (let i = 0; i < area / 12; i++) { const s = spotIn(b); addProp("city_tree", s.x, s.y, [-2, -3, 4, 3]); }
-    } else if (kinds[k] === "lot") {
-      for (let i = 0; i < area / 22; i++) { const s = spotIn(b); car(s.x, s.y, Math.random() < 0.5); }
-      for (let i = 0; i < area / 30; i++) {
-        const s = spotIn(b);
-        const p = addProp(Math.random() < 0.5 ? "city_firebarrel" : pick(["city_barrel", "city_barrel_blue"]), s.x, s.y, [-5, -6, 10, 6]);
-        if (p && p.img === "city_firebarrel") { p.fire = true; p.fireY = 12; }
-      }
-      for (let i = 0; i < area / 40; i++) { const s = spotIn(b); addProp("city_dumpster", s.x, s.y, [-13, -10, 26, 9]); }
-    } else if (kinds[k] === "plaza") {
-      kingPos = { x: ((b.x0 + b.x1 + 1) / 2) * TILE, y: ((b.y0 + b.y1 + 1) / 2) * TILE + 8 };
-      addProp(null, kingPos.x, kingPos.y, [-15, -3, 4, 4], { gallows: true });
-      for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-        const p = addProp("city_firebarrel", kingPos.x + dx * 40, kingPos.y + dy * 26, [-5, -6, 10, 6]);
-        if (p) { p.fire = true; p.fireY = 12; }
-      }
-      for (let i = 0; i < area / 16; i++) { const s = spotIn(b); if (dist(s, kingPos) > 50) addProp("city_tree", s.x, s.y, [-2, -3, 4, 3]); }
+  const roadTop = cj ? y0 + 6 : EDGE, roadLeft = ci ? x0 + 6 : EDGE; // segments clear of the crossing
+  if (ci) { // west road (vertical)
+    for (let ty = roadTop + 1; ty < y1 - 1; ty += ri(5, 11)) car((x0 + (R() < 0.5 ? 1 : 3)) * TILE, ty * TILE + rf(0, 8), true);
+    if (R() < 0.3) { const ty = ri(roadTop, y1 - 2); addProp("city_barricade", (x0 + (R() < 0.5 ? 1 : 3)) * TILE, ty * TILE, [-15, -8, 30, 7]); }
+    for (let ty = roadTop + 1; ty < y1 - 1; ty += 6) lamp(x0 + 4, ty, true);
+    for (let ty = roadTop; ty < y1 - 2; ty += ri(8, 12)) {
+      const tx = x0 + ri(0, 2);
+      cell.manholes.push({ x: tx * TILE + 4, y: ty * TILE + 6 });
+      cell.spawns.push({ x: tx * TILE + 10, y: ty * TILE + 12 });
     }
-  });
-  // alleys and lots between buildings get dumpsters, bags and barrels
-  for (let i = 0; i < N / 70; i++) {
-    const tx = irnd(EDGE, MAP_W - EDGE - 1), ty = irnd(EDGE, MAP_H - EDGE - 1);
-    if (T[at(tx, ty)] !== T_LOT && T[at(tx, ty)] !== T_WALK) continue;
-    const x = tx * TILE + 8, y = ty * TILE + 12, r = Math.random();
+  }
+  if (cj) { // north road (horizontal)
+    for (let tx = roadLeft + 1; tx < x1 - 1; tx += ri(5, 11)) car(tx * TILE + rf(0, 8), (y0 + (R() < 0.5 ? 2 : 4)) * TILE - 2, false);
+    if (R() < 0.3) { const tx = ri(roadLeft + 1, x1 - 2); addProp("city_barricade", tx * TILE, (y0 + 2) * TILE + (R() < 0.5 ? 0 : 16), [-15, -8, 30, 7]); }
+    for (let tx = roadLeft; tx < x1 - 1; tx += 7) lamp(tx, y0 + 4, R() < 0.5);
+    for (let tx = roadLeft; tx < x1 - 2; tx += ri(9, 14)) {
+      const ty = y0 + ri(0, 2);
+      cell.manholes.push({ x: tx * TILE + 4, y: ty * TILE + 6 });
+      cell.spawns.push({ x: tx * TILE + 10, y: ty * TILE + 12 });
+    }
+  }
+  // lamps on the far sidewalks (they line the next roads east and south)
+  if (ci < roadX.length) for (let ty = roadTop + 3; ty < y1 - 1; ty += 6) lamp(x1, ty, false);
+  if (cj < roadY.length) for (let tx = roadLeft + 3; tx < x1 - 1; tx += 7) lamp(tx, y1, R() < 0.5);
+
+  const area = (bw + 1) * (bh + 1);
+  const spot = () => ({ x: rf(block.x0 * TILE + 10, (block.x1 + 1) * TILE - 10), y: rf(block.y0 * TILE + 16, (block.y1 + 1) * TILE - 4) });
+  if (kind === "park") {
+    for (let i = 0; i < area / 12; i++) { const s = spot(); addProp("city_tree", s.x, s.y, [-2, -3, 4, 3]); }
+  } else if (kind === "lot") {
+    for (let i = 0; i < area / 22; i++) { const s = spot(); car(s.x, s.y, R() < 0.5); }
+    for (let i = 0; i < area / 30; i++) { const s = spot(); barrel(s.x, s.y); }
+    for (let i = 0; i < area / 40; i++) { const s = spot(); addProp("city_dumpster", s.x, s.y, [-13, -10, 26, 9]); }
+  } else if (kind === "plaza") {
+    const k = { x: ((block.x0 + block.x1 + 1) / 2) * TILE, y: ((block.y0 + block.y1 + 1) / 2) * TILE + 8 };
+    cell.king = k;
+    addProp(null, k.x, k.y, [-15, -3, 4, 4], { gallows: true });
+    for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) fire(addProp("city_firebarrel", k.x + dx * 40, k.y + dy * 26, [-5, -6, 10, 6]));
+    for (let i = 0; i < area / 16; i++) { const s = spot(); if (dist(s, k) > 50) addProp("city_tree", s.x, s.y, [-2, -3, 4, 3]); }
+  }
+  // alleys and setbacks collect dumpsters, barrels and fire barrels
+  for (let i = 0; i < w * h / 70; i++) {
+    const tx = ri(x0, x1), ty = ri(y0, y1);
+    const t = T[L(tx, ty)];
+    if (t !== T_LOT && t !== T_WALK) continue;
+    const x = tx * TILE + 8, y = ty * TILE + 12, r = R();
     if (r < 0.25) addProp("city_dumpster", x, y, [-13, -10, 26, 9]);
-    else if (r < 0.55) addProp(pick(["city_barrel", "city_barrel_blue"]), x, y, [-5, -6, 10, 6]);
-    else if (r < 0.7) { const p = addProp("city_firebarrel", x, y, [-5, -6, 10, 6]); if (p) { p.fire = true; p.fireY = 12; } }
+    else if (r < 0.7) barrel(x, y);
   }
 
-  propGrid = Array.from({ length: N }, () => []);
-  walkGrid = new Uint8Array(N);
-  for (let i = 0; i < N; i++) walkGrid[i] = solidGrid[i] ? 0 : 1;
-  for (const p of props) {
+  // per-tile solids + walkability
+  cell.pg = new Array(w * h);
+  cell.walk = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) cell.walk[i] = T[i] === T_BLD ? 0 : 1;
+  for (const p of cell.props) {
     const r = p.rect;
     if (!r) continue;
     for (let ty = Math.floor(r.y / TILE); ty <= Math.floor((r.y + r.h) / TILE); ty++) {
       for (let tx = Math.floor(r.x / TILE); tx <= Math.floor((r.x + r.w) / TILE); tx++) {
-        if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue;
-        propGrid[at(tx, ty)].push(r);
+        if (!inCell(tx, ty)) continue;
+        const i = L(tx, ty);
+        (cell.pg[i] || (cell.pg[i] = [])).push(r);
         const cx = tx * TILE + 8, cy = ty * TILE + 8;
-        if (cx > r.x && cx < r.x + r.w && cy > r.y && cy < r.y + r.h) walkGrid[at(tx, ty)] = 0;
+        if (cx > r.x && cx < r.x + r.w && cy > r.y && cy < r.y + r.h) cell.walk[i] = 0;
       }
     }
   }
+  return cell;
+}
 
-  // ---- paint the floor canvas
-  floorCanvas = document.createElement("canvas");
-  floorCanvas.width = WORLD_W; floorCanvas.height = WORLD_H + 8;
-  const fc = floorCanvas.getContext("2d");
+// every cell overlapping a world-space rectangle
+function cellsIn(x0, y0, x1, y1) {
+  const out = [];
+  const c0 = colOf(Math.max(0, Math.floor(x0 / TILE))), c1 = colOf(Math.min(MAP_W - 1, Math.floor(x1 / TILE)));
+  const r0 = rowOf(Math.max(0, Math.floor(y0 / TILE))), r1 = rowOf(Math.min(MAP_H - 1, Math.floor(y1 / TILE)));
+  for (let ci = c0; ci <= c1; ci++) for (let cj = r0; cj <= r1; cj++) out.push(getCell(ci, cj));
+  return out;
+}
+
+// ---- floor: painted per chunk on first sight, evicted when long unseen
+function getChunk(kx, ky) {
+  const key = kx * 65536 + ky;
+  let ch = chunkCache.get(key);
+  if (!ch) {
+    if (chunkCache.size >= CHUNK_CAP) evict(chunkCache, CHUNK_CAP / 4);
+    ch = { canvas: paintChunk(kx, ky), stamp: 0 };
+    chunkCache.set(key, ch);
+  }
+  ch.stamp = mapStamp;
+  return ch.canvas;
+}
+
+const WIN_TILES = ["win0", "win0", "win0", "win0", "win2", "win2", "win3", "win3", "win1"];
+function paintChunk(kx, ky) {
+  const S = CHUNK * TILE, cv = document.createElement("canvas");
+  cv.width = S; cv.height = S;
+  const fc = cv.getContext("2d");
   fc.imageSmoothingEnabled = false;
+  const tx0 = kx * CHUNK, ty0 = ky * CHUNK;
   const put = (name, x, y, fb) => {
     const im = IMG[name];
     if (imgOk(im)) fc.drawImage(im, x, y);
     else if (fb) { fc.fillStyle = fb; fc.fillRect(x, y, TILE, TILE); } // survives a stale-cache sprite mismatch
   };
-  const hash = (tx, ty) => ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
-  const WIN = ["win0", "win0", "win0", "win0", "win2", "win2", "win3", "win3", "win1"];
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      const i = at(tx, ty), h = hash(tx, ty), x = tx * TILE, y = ty * TILE, t = T[i];
-      if (t === T_ROAD) put(`city_road_${h % 13 === 0 ? 3 : h % 3}`, x, y, "#38383e");
-      else if (t === T_WALK) put(`city_walk_${h % 5 === 0 ? 1 : 0}`, x, y, "#76726e");
+  for (let ly = 0; ly < CHUNK; ly++) {
+    for (let lx = 0; lx < CHUNK; lx++) {
+      const tx = tx0 + lx, ty = ty0 + ly, x = lx * TILE, y = ly * TILE;
+      if (oob(tx, ty)) { fc.fillStyle = "#0b0910"; fc.fillRect(x, y, TILE, TILE); continue; }
+      const t = tileType(tx, ty), h = hash3(tx, ty, 11);
+      if (t === T_ROAD) {
+        const vr = inVRoad(tx), hr = inHRoad(ty);
+        if (vr && !hr && walkRow(ty)) put("city_cross_v", x, y, "#38383e");
+        else if (hr && !vr && walkCol(tx)) put("city_cross_h", x, y, "#38383e");
+        else {
+          put(`city_road_${h % 13 === 0 ? 3 : h % 3}`, x, y, "#38383e");
+          fc.fillStyle = "rgba(196,160,60,0.75)"; // dashed centre lines
+          if (vr && !hr && !walkRow(ty) && tx === roadX[colOf(tx) - 1] + 2) fc.fillRect(x, y + 3, 2, 9);
+          if (hr && !vr && !walkCol(tx) && ty === roadY[rowOf(ty) - 1] + 2) fc.fillRect(x + 3, y, 9, 2);
+          if (h % 19 === 0) put("city_crack", x, y);
+        }
+      } else if (t === T_WALK) put(`city_walk_${h % 5 === 0 ? 1 : 0}`, x, y, "#76726e");
       else if (t === T_LOT) put(`city_lot_${h % 3}`, x, y, "#52483c");
       else if (t === T_GRASS) put(`city_grass_${h % 2}`, x, y, "#464c2e");
       else if (t === T_PLAZA) put(`city_plaza_${(tx + ty) % 2}`, x, y, "#706054");
       else {
-        const b = buildings[bid[i]] || { wall: "concrete", roof: 0, doors: new Set() };
-        const below1 = ty + 1 < MAP_H && T[i + MAP_W] !== T_BLD;
-        const below2 = ty + 2 < MAP_H && T[i + 2 * MAP_W] !== T_BLD && T[i + MAP_W] === T_BLD;
-        if (below1) put(b.doors.has(tx) ? `city_wall_${b.wall}_door${h % 3 === 0 ? 1 : 0}` : `city_wall_${b.wall}_${WIN[h % WIN.length]}`, x, y, "#5a4c48");
-        else if (below2) put(`city_wall_${b.wall}_${WIN[(h >> 3) % WIN.length]}`, x, y, "#5a4c48");
+        const b = buildingAt(tx, ty);
+        const below1 = tileType(tx, ty + 1) !== T_BLD;
+        const below2 = !below1 && tileType(tx, ty + 2) !== T_BLD;
+        if (below1) put(b.doors.has(tx) ? `city_wall_${b.wall}_door${h % 3 === 0 ? 1 : 0}` : `city_wall_${b.wall}_${WIN_TILES[h % WIN_TILES.length]}`, x, y, "#5a4c48");
+        else if (below2) put(`city_wall_${b.wall}_${WIN_TILES[(h >> 3) % WIN_TILES.length]}`, x, y, "#5a4c48");
         else {
           put(`city_roof_${b.roof}`, x, y, "#403e44");
           // parapet: dark edge where the roof meets another building or the sky
           fc.fillStyle = "#1a161e";
-          if (ty === 0 || bid[i - MAP_W] !== bid[i]) fc.fillRect(x, y, TILE, 2);
-          if (tx === 0 || bid[i - 1] !== bid[i]) fc.fillRect(x, y, 1, TILE);
-          if (tx === MAP_W - 1 || bid[i + 1] !== bid[i]) fc.fillRect(x + TILE - 1, y, 1, TILE);
-          if (h % 17 === 0 && bid[i] >= 0) put(h % 2 ? "city_ac" : "city_vent", x + 2, y + 3);
+          if (buildingAt(tx, ty - 1) !== b) fc.fillRect(x, y, TILE, 2);
+          if (buildingAt(tx - 1, ty) !== b) fc.fillRect(x, y, 1, TILE);
+          if (buildingAt(tx + 1, ty) !== b) fc.fillRect(x + TILE - 1, y, 1, TILE);
+          if (h % 17 === 0 && b !== EDGE_BLD) put(h % 2 ? "city_ac" : "city_vent", x + 2, y + 3);
         }
-        if (below1 && b.doors.has(tx) && bid[i] >= 0) spawnSpots.push({ x: x + 8, y: y + TILE + 8 });
+        continue;
       }
-    }
-  }
-  // curbs, facade shadows, lane markings, crosswalks
-  for (let ty = 0; ty < MAP_H; ty++) {
-    for (let tx = 0; tx < MAP_W; tx++) {
-      const i = at(tx, ty), x = tx * TILE, y = ty * TILE;
-      if (T[i] === T_WALK) {
+      if (t === T_WALK) { // curbs
         fc.fillStyle = "rgba(30,28,34,0.8)";
-        if (tx + 1 < MAP_W && T[i + 1] === T_ROAD) fc.fillRect(x + 15, y, 1, TILE);
-        if (tx > 0 && T[i - 1] === T_ROAD) fc.fillRect(x, y, 1, TILE);
-        if (ty + 1 < MAP_H && T[i + MAP_W] === T_ROAD) fc.fillRect(x, y + 15, TILE, 1);
-        if (ty > 0 && T[i - MAP_W] === T_ROAD) fc.fillRect(x, y, TILE, 1);
+        if (tileType(tx + 1, ty) === T_ROAD) fc.fillRect(x + 15, y, 1, TILE);
+        if (tileType(tx - 1, ty) === T_ROAD) fc.fillRect(x, y, 1, TILE);
+        if (tileType(tx, ty + 1) === T_ROAD) fc.fillRect(x, y + 15, TILE, 1);
+        if (tileType(tx, ty - 1) === T_ROAD) fc.fillRect(x, y, TILE, 1);
       }
-      if (T[i] !== T_BLD && ty > 0 && T[i - MAP_W] === T_BLD) {
-        fc.fillStyle = "rgba(0,0,0,0.35)"; fc.fillRect(x, y, TILE, 3);
+      if (tileType(tx, ty - 1) === T_BLD) { fc.fillStyle = "rgba(0,0,0,0.35)"; fc.fillRect(x, y, TILE, 3); } // facade shadow
+      if (walkAt(tx, ty)) { // decals
+        const r = (h >>> 8) % 1000;
+        if (r < 15) put("city_blood", x, y);
+        else if (r < 20) put(r < 18 ? "skull" : "bone_pile", x + 2, y + 6);
+        else if (r < 35 && t !== T_ROAD) put("city_trash", x, y + 5);
       }
     }
   }
-  fc.fillStyle = "rgba(196,160,60,0.75)";
-  for (const x of vx) for (let ty = EDGE; ty < MAP_H - EDGE; ty++) {
-    if (!inH(ty) && !hy.some(y => ty === y - 1 || ty === y + 4)) fc.fillRect((x + 2) * TILE - 1, ty * TILE + 3, 2, 9);
-  }
-  for (const y of hy) for (let tx = EDGE; tx < MAP_W - EDGE; tx++) {
-    if (!inV(tx) && !vx.some(x => tx === x - 1 || tx === x + 4)) fc.fillRect(tx * TILE + 3, (y + 2) * TILE - 1, 9, 2);
-  }
-  for (const x of vx) for (const y of hy) {
-    for (let k = 0; k < 4; k++) {
-      for (const ty of [y - 1, y + 4]) if (T[at(x + k, ty)] === T_ROAD) put("city_cross_v", (x + k) * TILE, ty * TILE);
-      for (const tx of [x - 1, x + 4]) if (T[at(tx, y + k)] === T_ROAD) put("city_cross_h", tx * TILE, (y + k) * TILE);
+  // manholes and the King's blood can straddle a chunk edge: draw from every nearby cell
+  for (const c of cellsIn(tx0 * TILE - TILE, ty0 * TILE - TILE, (tx0 + CHUNK + 1) * TILE, (ty0 + CHUNK + 1) * TILE)) {
+    for (const m of c.manholes) put("city_manhole", m.x - tx0 * TILE, m.y - ty0 * TILE);
+    if (c.king) {
+      fc.fillStyle = "rgba(110,20,26,0.75)";
+      fc.beginPath(); fc.ellipse(c.king.x - tx0 * TILE, c.king.y - ty0 * TILE + 3, 9, 3, 0, 0, Math.PI * 2); fc.fill();
     }
   }
-  // decals: cracks, blood, bones; sewer manholes the dead climb out of
-  for (let ty = EDGE; ty < MAP_H - EDGE; ty++) {
-    for (let tx = EDGE; tx < MAP_W - EDGE; tx++) {
-      const i = at(tx, ty), x = tx * TILE, y = ty * TILE;
-      if (T[i] === T_BLD || !walkGrid[i]) continue;
-      const r = Math.random();
-      if (T[i] === T_ROAD && r < 0.05) put("city_crack", x, y);
-      else if (r < 0.065) put("city_blood", x, y);
-      else if (r < 0.07) put(Math.random() < 0.5 ? "skull" : "bone_pile", x + 2, y + 6);
-      else if (r < 0.085 && T[i] !== T_ROAD) put("city_trash", x, y + 5);
-    }
-  }
-  for (const x of vx) for (let ty = EDGE + 3; ty < MAP_H - EDGE - 3; ty += irnd(8, 12)) {
-    const tx = x + irnd(0, 2);
-    if (inH(ty) || !walkGrid[at(tx, ty)]) continue;
-    put("city_manhole", tx * TILE + 4, ty * TILE + 6);
-    spawnSpots.push({ x: tx * TILE + 10, y: ty * TILE + 12 });
-  }
-  for (const y of hy) for (let tx = EDGE + 3; tx < MAP_W - EDGE - 3; tx += irnd(9, 14)) {
-    const ty = y + irnd(0, 2);
-    if (inV(tx) || !walkGrid[at(tx, ty)]) continue;
-    put("city_manhole", tx * TILE + 4, ty * TILE + 6);
-    spawnSpots.push({ x: tx * TILE + 10, y: ty * TILE + 12 });
-  }
-  if (kingPos) { // dried blood under the gallows
-    fc.fillStyle = "rgba(110,20,26,0.75)";
-    fc.beginPath(); fc.ellipse(kingPos.x, kingPos.y + 3, 9, 3, 0, 0, Math.PI * 2); fc.fill();
-  }
+  return cv;
+}
 
-  // minimap: one pixel per tile
-  miniCanvas = document.createElement("canvas");
-  miniCanvas.width = MAP_W; miniCanvas.height = MAP_H;
-  const mc = miniCanvas.getContext("2d");
-  const MCOL = ["#1c1820", "#55555e", "#7a7672", "#4e4438", "#46502e", "#7a6250"];
-  for (let i = 0; i < N; i++) { mc.fillStyle = MCOL[T[i]]; mc.fillRect(i % MAP_W, Math.floor(i / MAP_W), 1, 1); }
+function drawFloor(cx, cy) {
+  const S = CHUNK * TILE;
+  for (let ky = Math.floor(cy / S); ky <= Math.floor((cy + VH) / S); ky++) {
+    for (let kx = Math.floor(cx / S); kx <= Math.floor((cx + VW) / S); kx++) {
+      if (kx < 0 || ky < 0 || kx * CHUNK >= MAP_W || ky * CHUNK >= MAP_H) continue;
+      ctx.drawImage(getChunk(kx, ky), kx * S, ky * S);
+    }
+  }
 }
 
 // push a circle out of one rect; a center buried inside exits by the nearest side
@@ -1907,54 +1974,59 @@ function pushOut(x, y, r, s) {
 function collideSolids(x, y, r) {
   for (let ty = Math.floor((y - r) / TILE); ty <= Math.floor((y + r) / TILE); ty++) {
     for (let tx = Math.floor((x - r) / TILE); tx <= Math.floor((x + r) / TILE); tx++) {
-      if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue;
-      const i = ty * MAP_W + tx;
-      if (solidGrid[i]) [x, y] = pushOut(x, y, r, { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE });
-      for (const s of propGrid[i]) [x, y] = pushOut(x, y, r, s);
+      if (tileType(tx, ty) === T_BLD) [x, y] = pushOut(x, y, r, { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE });
+      for (const s of rectsAt(tx, ty)) [x, y] = pushOut(x, y, r, s);
     }
   }
   return { x, y };
 }
 
 const inRock = (x, y) => {
-  const i = tileAt(x, y);
-  return !!solidGrid[i] || propGrid[i].some(s => x > s.x && x < s.x + s.w && y > s.y && y < s.y + s.h);
+  const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+  return tileType(tx, ty) === T_BLD || rectsAt(tx, ty).some(s => x > s.x && x < s.x + s.w && y > s.y && y < s.y + s.h);
 };
 
-// flow field: BFS tile distances from the player, refreshed a few times a
-// second; zombies walk downhill on it, so they round corners and buildings
-let flowDist = null, flowQ = null, flowT = 0;
+// flow field: BFS tile distances from the player inside a window around
+// them, refreshed a few times a second; zombies walk downhill on it, so they
+// round corners and buildings. Outside the window they walk straight.
+const FLOW_N = 80;
+const flowDist = new Int32Array(FLOW_N * FLOW_N), flowQ = new Int32Array(FLOW_N * FLOW_N), flowWalk = new Uint8Array(FLOW_N * FLOW_N);
+let flowT = 0, flowX0 = 0, flowY0 = 0;
 function updateFlow() {
-  const N = MAP_W * MAP_H;
-  if (!flowDist || flowDist.length !== N) { flowDist = new Int32Array(N); flowQ = new Int32Array(N); }
+  const N = FLOW_N;
+  const ptx = Math.floor(player.x / TILE), pty = Math.floor(player.y / TILE);
+  flowX0 = ptx - N / 2; flowY0 = pty - N / 2;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) flowWalk[y * N + x] = walkAt(flowX0 + x, flowY0 + y);
   flowDist.fill(-1);
-  const s = tileAt(player.x, player.y);
+  const s = (pty - flowY0) * N + (ptx - flowX0);
   let head = 0, tail = 0;
   flowDist[s] = 0; flowQ[tail++] = s;
   while (head < tail) {
-    const i = flowQ[head++], x = i % MAP_W, d = flowDist[i] + 1;
-    if (x > 0 && walkGrid[i - 1] && flowDist[i - 1] < 0) { flowDist[i - 1] = d; flowQ[tail++] = i - 1; }
-    if (x < MAP_W - 1 && walkGrid[i + 1] && flowDist[i + 1] < 0) { flowDist[i + 1] = d; flowQ[tail++] = i + 1; }
-    if (i >= MAP_W && walkGrid[i - MAP_W] && flowDist[i - MAP_W] < 0) { flowDist[i - MAP_W] = d; flowQ[tail++] = i - MAP_W; }
-    if (i + MAP_W < N && walkGrid[i + MAP_W] && flowDist[i + MAP_W] < 0) { flowDist[i + MAP_W] = d; flowQ[tail++] = i + MAP_W; }
+    const i = flowQ[head++], x = i % N, d = flowDist[i] + 1;
+    if (x > 0 && flowWalk[i - 1] && flowDist[i - 1] < 0) { flowDist[i - 1] = d; flowQ[tail++] = i - 1; }
+    if (x < N - 1 && flowWalk[i + 1] && flowDist[i + 1] < 0) { flowDist[i + 1] = d; flowQ[tail++] = i + 1; }
+    if (i >= N && flowWalk[i - N] && flowDist[i - N] < 0) { flowDist[i - N] = d; flowQ[tail++] = i - N; }
+    if (i + N < N * N && flowWalk[i + N] && flowDist[i + N] < 0) { flowDist[i + N] = d; flowQ[tail++] = i + N; }
   }
 }
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 function flowDir(e) {
-  const i = tileAt(e.x, e.y), d0 = flowDist[i];
+  const N = FLOW_N;
+  const x = Math.floor(e.x / TILE) - flowX0, y = Math.floor(e.y / TILE) - flowY0;
+  if (x < 0 || y < 0 || x >= N || y >= N) return null;
+  const i = y * N + x, d0 = flowDist[i];
   if (d0 === 0 || d0 === 1) return null; // close enough to charge straight in
-  const x = i % MAP_W, y = Math.floor(i / MAP_W);
   let bestJ = -1, bd = d0 < 0 ? 1e9 : d0;
   for (const [dx, dy] of DIRS8) {
     const nx = x + dx, ny = y + dy;
-    if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
-    const j = ny * MAP_W + nx;
+    if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+    const j = ny * N + nx;
     if (flowDist[j] < 0 || flowDist[j] >= bd) continue;
-    if (dx && dy && (!walkGrid[i + dx] || !walkGrid[i + dy * MAP_W])) continue; // no corner cutting
+    if (dx && dy && (!flowWalk[i + dx] || !flowWalk[i + dy * N])) continue; // no corner cutting
     bd = flowDist[j]; bestJ = j;
   }
   if (bestJ < 0) return null;
-  return { x: (bestJ % MAP_W) * TILE + 8 - e.x, y: Math.floor(bestJ / MAP_W) * TILE + 8 - e.y };
+  return { x: (flowX0 + bestJ % N) * TILE + 8 - e.x, y: (flowY0 + Math.floor(bestJ / N)) * TILE + 8 - e.y };
 }
 
 // ------------------------------------------------------------------ state --
@@ -2243,8 +2315,9 @@ function startWave(w) {
 
 function spawnPointFor() {
   // the dead pour out of manholes and doorways just beyond the edge of sight
-  const near = spawnSpots.filter(s => { const d = dist(s, player); return d > 170 && d < 380; });
-  const pool = near.length ? near : spawnSpots.filter(s => dist(s, player) > 120);
+  const spots = cellsIn(player.x - 380, player.y - 380, player.x + 380, player.y + 380).flatMap(c => c.spawns);
+  const near = spots.filter(s => { const d = dist(s, player); return d > 170 && d < 380; });
+  const pool = near.length ? near : spots.filter(s => dist(s, player) > 120);
   if (pool.length) {
     const s = pick(pool);
     return { x: s.x + rnd(-4, 4), y: s.y + rnd(-3, 3) };
@@ -2252,7 +2325,7 @@ function spawnPointFor() {
   for (let i = 0; i < 60; i++) { // fallback: any open tile at a fair distance
     const a = rnd(0, Math.PI * 2), r = rnd(200, 340);
     const x = player.x + Math.cos(a) * r, y = player.y + Math.sin(a) * r;
-    if (x > 0 && y > 0 && x < WORLD_W && y < WORLD_H && walkGrid[tileAt(x, y)]) return { x, y };
+    if (walkAt(Math.floor(x / TILE), Math.floor(y / TILE))) return { x, y };
   }
   return { x: player.x + 200, y: player.y };
 }
@@ -2660,6 +2733,12 @@ function updatePlay(dt) {
     e.animT += dt;
     e.hitFlash = Math.max(0, e.hitFlash - dt);
     if (e.warmup > 0) { e.warmup -= dt; continue; }
+    if (dist(e, player) > 720) { // left far behind in a huge city: climb out of a nearer manhole
+      Object.assign(e, spawnPointFor());
+      e.warmup = 0.8; e.avoidT = 0;
+      fx.push({ kind: "spawn", x: e.x, y: e.y, life: 0.8, max: 0.8 });
+      continue;
+    }
     const dToP = dist(e, player);
     let sp = e.spd;
     if (e.rage && e.hp < e.maxHp * 0.5) sp *= 1.7;
@@ -2915,7 +2994,7 @@ function renderWorld() {
   const { cx, cy } = camera();
   ctx.save();
   ctx.translate(-Math.round(cx), -Math.round(cy));
-  ctx.drawImage(floorCanvas, 0, 0);
+  drawFloor(cx, cy);
 
 
   // burning ground under everything
@@ -2955,9 +3034,11 @@ function renderWorld() {
 
   // entities, y-sorted
   const drawables = [];
-  for (const p of props) {
-    if (p.x < cx - 40 || p.x > cx + VW + 40 || p.y < cy - 8 || p.y > cy + VH + 50) continue;
-    drawables.push({ y: p.y, draw: () => drawProp(p) });
+  for (const c of cellsIn(cx - 40, cy - 8, cx + VW + 40, cy + VH + 50)) {
+    for (const p of c.props) {
+      if (p.x < cx - 40 || p.x > cx + VW + 40 || p.y < cy - 8 || p.y > cy + VH + 50) continue;
+      drawables.push({ y: p.y, draw: () => drawProp(p) });
+    }
   }
   for (const e of enemies) drawables.push({ y: e.y, draw: () => drawEnemy(e) });
   drawables.push({ y: player.y, draw: drawPlayer });
@@ -3154,11 +3235,13 @@ function renderDarkness(cx, cy) {
     else if (p.kind === "flash") punch(p.x, p.y, p.r * 2, 0.9 * p.life / p.max);
   }
   for (const ring of bossRings) punch(ring.x, ring.y, ring.r + 14, 0.5);
-  for (const l of lamps) {
-    if (l.flicker && Math.sin(G.t * 23 + l.t) + Math.sin(G.t * 7.3 + l.t * 2) > 1.1) continue; // dying bulb
-    punch(l.x, l.y, 62, 0.8);
+  for (const c of cellsIn(cx - 70, cy - 70, cx + VW + 70, cy + VH + 70)) {
+    for (const l of c.lamps) {
+      if (l.flicker && Math.sin(G.t * 23 + l.t) + Math.sin(G.t * 7.3 + l.t * 2) > 1.1) continue; // dying bulb
+      punch(l.x, l.y, 62, 0.8);
+    }
+    for (const p of c.props) if (p.fire) punch(p.x, p.y - p.fireY, 48 + Math.sin(G.t * 9 + p.t) * 4, 0.85);
   }
-  for (const p of props) if (p.fire) punch(p.x, p.y - p.fireY, 48 + Math.sin(G.t * 9 + p.t) * 4, 0.85);
   if (kingPos) punch(kingPos.x, kingPos.y - 12, 36, 0.5);
   let n = 0;
   for (const e of enemies) { if (n++ > 50) break; punch(e.x, e.y, e.big ? 40 : 24, 0.45); }
@@ -3248,22 +3331,55 @@ function renderHUD() {
 
 let pauseBtnRect = null, fsPauseRect = null, invRects = [];
 
-// city map, bottom-left: you (white), the horde (red), the King (gold)
+// radar, bottom-left: the streets around you (white), the horde (red);
+// the King is a gold dot, or a gold arrow on the rim when out of range
+const RADAR_W = 96, RADAR_H = 64, RADAR_TPP = 2; // tiles per radar pixel
+let radarCanvas = null, radarT = 0;
+const RADAR_COL = ["#1c1820", "#55555e", "#7a7672", "#4e4438", "#46502e", "#7a6250", "#08060c"]; // by tile type; last = off-map
 function renderMinimap() {
-  const s = 96 / MAP_W, w = Math.round(MAP_W * s), h = Math.round(MAP_H * s);
-  const x0 = 6, y0 = VH - h - 6;
+  if (!radarCanvas) { radarCanvas = document.createElement("canvas"); radarCanvas.width = RADAR_W; radarCanvas.height = RADAR_H; }
+  const ox = Math.floor(player.x / TILE) - RADAR_W * RADAR_TPP / 2, oy = Math.floor(player.y / TILE) - RADAR_H * RADAR_TPP / 2;
+  if ((radarT -= 1 / 60) <= 0) { // resample a few times a second
+    radarT = 0.25;
+    // fillRect runs, not putImageData: re-uploading pixel data stalls some GPUs
+    const rc = radarCanvas.getContext("2d");
+    for (let y = 0; y < RADAR_H; y++) {
+      let runX = 0, runC = -1;
+      for (let x = 0; x <= RADAR_W; x++) {
+        const tx = ox + x * RADAR_TPP, ty = oy + y * RADAR_TPP;
+        const c = x === RADAR_W ? -2 : oob(tx, ty) ? 6 : tileType(tx, ty);
+        if (c === runC) continue;
+        if (runC !== -1) { rc.fillStyle = RADAR_COL[runC]; rc.fillRect(runX, y, x - runX, 1); }
+        runX = x; runC = c;
+      }
+    }
+  }
+  const x0 = 6, y0 = VH - RADAR_H - 6;
   ctx.globalAlpha = 0.8;
-  ctx.drawImage(miniCanvas, x0, y0, w, h);
+  ctx.drawImage(radarCanvas, x0, y0);
   ctx.globalAlpha = 1;
-  ctx.strokeStyle = "#57506b"; ctx.lineWidth = 1; ctx.strokeRect(x0 - 0.5, y0 - 0.5, w + 1, h + 1);
-  const dot = (x, y, col, r) => { ctx.fillStyle = col; ctx.fillRect(Math.round(x0 + x / TILE * s - r / 2), Math.round(y0 + y / TILE * s - r / 2), r, r); };
+  ctx.strokeStyle = "#57506b"; ctx.lineWidth = 1; ctx.strokeRect(x0 - 0.5, y0 - 0.5, RADAR_W + 1, RADAR_H + 1);
+  const rx = x => (x - player.x) / TILE / RADAR_TPP + RADAR_W / 2, ry = y => (y - player.y) / TILE / RADAR_TPP + RADAR_H / 2;
+  const dot = (x, y, col, r) => {
+    const px = rx(x), py = ry(y);
+    if (px < 0 || py < 0 || px >= RADAR_W || py >= RADAR_H) return;
+    ctx.fillStyle = col; ctx.fillRect(Math.round(x0 + px - r / 2), Math.round(y0 + py - r / 2), r, r);
+  };
   let n = 0;
   for (const e of enemies) { if (n++ > 150) break; if (e.warmup <= 0) dot(e.x, e.y, e.bossBar ? "#ff4d4d" : "#c0303a", e.bossBar ? 3 : 1); }
-  if (kingPos && Math.floor(G.t * 2) % 2) dot(kingPos.x, kingPos.y, "#ffd166", 3);
+  if (kingPos && Math.floor(G.t * 2) % 2) {
+    const kx = rx(kingPos.x), ky = ry(kingPos.y);
+    if (kx >= 0 && ky >= 0 && kx < RADAR_W && ky < RADAR_H) dot(kingPos.x, kingPos.y, "#ffd166", 3);
+    else { // arrow on the rim pointing toward him
+      const a = Math.atan2(ky - RADAR_H / 2, kx - RADAR_W / 2);
+      const k = Math.min((RADAR_W / 2 - 3) / Math.abs(Math.cos(a) || 1e-9), (RADAR_H / 2 - 3) / Math.abs(Math.sin(a) || 1e-9));
+      const ax = x0 + RADAR_W / 2 + Math.cos(a) * k, ay = y0 + RADAR_H / 2 + Math.sin(a) * k;
+      ctx.fillStyle = "#ffd166"; // pixel chevron: a dot plus a tip one step further out
+      ctx.fillRect(Math.round(ax) - 1, Math.round(ay) - 1, 3, 3);
+      ctx.fillRect(Math.round(ax + Math.cos(a) * 2), Math.round(ay + Math.sin(a) * 2), 1, 1);
+    }
+  }
   dot(player.x, player.y, "#ffffff", 2);
-  // the viewport
-  ctx.strokeStyle = "rgba(255,255,255,0.35)";
-  ctx.strokeRect(Math.round(x0 + G.cam.x / TILE * s) + 0.5, Math.round(y0 + G.cam.y / TILE * s) + 0.5, Math.round(VW / TILE * s), Math.round(VH / TILE * s));
 }
 
 // armorer-only (dev mode): switch to any gun mid-run, stats rebuilt from
@@ -4148,6 +4264,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  mapStamp++;
   ctx.imageSmoothingEnabled = false;
 
   if (assetsLeft > 0) {

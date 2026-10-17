@@ -70,18 +70,25 @@ src/game.js` before building.
   by `rollRarity(luck)`; pick 1-of-3 per banked level; `META.wpn` weapon
   levels bought via `tryUpgradeWeapon` on the select screen; shop
   spends `G.coins` (reroll/heal/extra pick), leave via NEXT WAVE
-- **Map** (`buildMap`) — random abandoned city, 240×160 tiles: road grid
-  (`vx`/`hy`), blocks of buildings / parks / lots, east plaza with the
-  King. Buildings are `solidGrid` tiles; cars, barrels, lamps, trees are
-  `props` (drawn live, y-sorted) whose rects sit in `propGrid` per tile.
-  `collideSolids` / `inRock` only look at nearby tiles. Zombies follow a
-  BFS flow field (`updateFlow` every 0.25s, `flowDir`) and spawn at
-  `spawnSpots` (manholes + doors) 170–380px from the player
+- **Map** — a *virtual* abandoned city (`MAP_W`/`MAP_H`, default
+  4096² tiles; tested to 65536²). Nothing is stored map-wide: `buildMap`
+  only seeds `SEED` and the sorted road lists `roadX`/`roadY`. A cell =
+  one block + its west and north road; `genCell(ci, cj)` builds it
+  deterministically (tile types, buildings, props, lamps, spawns,
+  manholes, per-tile prop rects) and `getCell` caches it (LRU,
+  `CELL_CAP`). Query tiles via `tileType` / `walkAt` / `rectsAt`; never
+  loop over the whole map. The floor is painted per 16×16-tile chunk on
+  first sight (`getChunk`/`paintChunk`, LRU `CHUNK_CAP`); all floor
+  randomness is `hash3`, so repaints match. Props, lamps and spawns come
+  from `cellsIn(rect)` around the camera/player. Flow field: BFS in an
+  80×80-tile window (`updateFlow` every 0.25s); zombies beyond 720px are
+  recalled to a nearer manhole. HUD radar samples tiles around the player
+  and points at the King. Bump `mapStamp` once per frame (LRU clock)
 - **States**: title → credits (optional) → cls → select → play ⇄ campfire
   → gameover/victory. All input goes through `handleKey` / `handleClick`
 - **Rendering**: 480×270 internal canvas, pixel-perfect (`image-rendering:
   pixelated`), feet-anchored `drawSprite`, y-sorted entities, offscreen
-  floor canvas, minimap, darkness overlay with radial "punch" lights, screenshake,
+  chunked floor canvases, radar, darkness overlay with radial "punch" lights, screenshake,
   damage-number texts
 
 ## Conventions
