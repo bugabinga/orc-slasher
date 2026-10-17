@@ -1950,7 +1950,7 @@ function killEnemy(z, how) {
   const coinCount = z.ghost ? 0 : (z.big ? 3 : (Math.random() < 0.3 * (1 + player.stats.goldDig) ? 1 : 0));
   for (let i = 0; i < coinCount; i++) pickup(PK_COIN, z.x + rnd(-6, 6), z.y + rnd(-4, 4), 1);
   if (Math.random() < (z.big ? 0.8 : 0.04)) pickup(PK_FLASK, z.x, z.y, 0);
-  if (z.big && Math.random() < 0.001) { // 0.1% relic drop from bosses
+  if (z.bossBar && Math.random() < 0.001) { // 0.1% relic drop from bosses
     const locked = ["demo", "heavy"].filter(c => !UN[c]);
     if (locked.length) {
       const c = pick(locked);
@@ -2087,8 +2087,9 @@ function explode(x, y, r, dmg, crit, src = EX_PLAYER) {
       const d = Math.hypot(z.x - x, z.y - y);
       if (d >= r + z.r) continue;
       const fall = 1 - 0.5 * clamp(d / r, 0, 1);
-      if (src === EX_ENV) z.env = true;
+      z.env = src === EX_ENV; // CARNAGE x2 only if this blast is the killing blow
       damageEnemy(z, dmg * fall * (crit ? 2 : 1) * rnd(0.9, 1.1), crit, Math.atan2(z.y - y, z.x - x), 260 * fall * player.stats.knock, d < r * 0.55 ? HOW_GIB : HOW_FLUNG);
+      z.env = false;
     }
     if (src === EX_ENV && dist(player, { x, y }) < r + player.r) hurtPlayer(dmg * 0.35);
     blastWorld(x, y, r, dmg, src);
@@ -4921,16 +4922,8 @@ function softwareGL() {
   } catch (e) { return true; }
 }
 
-function initFX() {
-  const useGL = /[?&]gl=force/.test(location.search) || !softwareGL();
-  const gl = useGL && canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, powerPreference: "high-performance" });
-  if (!gl) { // plain 2D: both layers draw straight onto the visible canvas
-    const c2 = canvas.getContext("2d", { alpha: false });
-    if (c2) { sceneCtx = uiCtx = c2; ctx = c2; }
-    resizeFX();
-    window.addEventListener("resize", resizeFX);
-    return;
-  }
+// compile and link every FX program on a context; throws on failure
+function fxPrograms(gl) {
   const compile = (type, src) => {
     const sh = gl.createShader(type);
     gl.shaderSource(sh, src); gl.compileShader(sh);
@@ -4946,6 +4939,38 @@ function initFX() {
     for (const n of names) u[n] = gl.getUniformLocation(p, n);
     return { p, u };
   };
+  return {
+    light: program(FS_LIGHT, ["uScene", "uL", "uC", "uNL", "uAmb", "uTorch", "uCam", "uTime", "uLit", "uRain", "uFlash", "uRes"]),
+    bright: program(FS_BRIGHT, ["uSrc"]),
+    blur: program(FS_BLUR, ["uSrc", "uDir"]),
+    final: program(FS_FINAL, ["uLitT", "uBloom", "uUI", "uOut", "uTime", "uFx", "uHurt", "uLow", "uChroma", "uShock", "uNS", "RES"]),
+  };
+}
+// Once the visible canvas holds a WebGL context it can never fall back to 2D,
+// so the shaders are proven on a throwaway context before claiming it
+function fxProbe() {
+  try {
+    const g = document.createElement("canvas").getContext("webgl2");
+    if (!g) return false;
+    fxPrograms(g);
+    const lose = g.getExtension("WEBGL_lose_context");
+    if (lose) lose.loseContext();
+    return true;
+  } catch (e) {
+    console.warn("FX disabled:", e.message);
+    return false;
+  }
+}
+function initFX() {
+  const useGL = (/[?&]gl=force/.test(location.search) || !softwareGL()) && fxProbe();
+  const gl = useGL && canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, powerPreference: "high-performance" });
+  if (!gl) { // plain 2D: both layers draw straight onto the visible canvas
+    const c2 = canvas.getContext("2d", { alpha: false });
+    if (c2) { sceneCtx = uiCtx = c2; ctx = c2; }
+    resizeFX();
+    window.addEventListener("resize", resizeFX);
+    return;
+  }
   const tex = (w, h, filter) => {
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
@@ -4965,10 +4990,7 @@ function initFX() {
   try {
     const R = {
       gl,
-      light: program(FS_LIGHT, ["uScene", "uL", "uC", "uNL", "uAmb", "uTorch", "uCam", "uTime", "uLit", "uRain", "uFlash", "uRes"]),
-      bright: program(FS_BRIGHT, ["uSrc"]),
-      blur: program(FS_BLUR, ["uSrc", "uDir"]),
-      final: program(FS_FINAL, ["uLitT", "uBloom", "uUI", "uOut", "uTime", "uFx", "uHurt", "uLow", "uChroma", "uShock", "uNS", "RES"]),
+      ...fxPrograms(gl),
       scene: null, ui: null, lit: null, bloomA: null, bloomB: null, vw: 0, vh: 0, tex, target,
       vao: gl.createVertexArray(),
       lightPos: new Float32Array(MAX_LIGHTS * 4), lightCol: new Float32Array(MAX_LIGHTS * 3),
