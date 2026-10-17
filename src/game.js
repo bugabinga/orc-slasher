@@ -1,5 +1,6 @@
-/* ORC SLASHER — a Brotato-style cave roguelike.
- * Sprites: 0x72 DungeonTileset II (CC0) + original art (see assets/CREDITS.md).
+/* ZOMBIE BLASTER — a Brotato-style cave roguelike with guns.
+ * Sprites: 0x72 DungeonTileset II (CC0) + CraftPix + original art, all
+ * zombified by tools/zombify.py (see assets/CREDITS.md).
  */
 "use strict";
 
@@ -28,24 +29,6 @@ for (const [name, uri] of Object.entries(window.ASSETS)) {
 const imgOk = im => im && im.complete && im.naturalWidth > 0;
 
 const ANIM = {
-  hero_idle: ["knight_m_idle_f0", "knight_m_idle_f1", "knight_m_idle_f2", "knight_m_idle_f3"],
-  hero_run: ["knight_m_run_f0", "knight_m_run_f1", "knight_m_run_f2", "knight_m_run_f3"],
-  barbar_idle: ["dwarf_m_idle_f0", "dwarf_m_idle_f1", "dwarf_m_idle_f2", "dwarf_m_idle_f3"],
-  barbar_run: ["dwarf_m_run_f0", "dwarf_m_run_f1", "dwarf_m_run_f2", "dwarf_m_run_f3"],
-  nun_idle: ["nun_idle_f0", "nun_idle_f1", "nun_idle_f2", "nun_idle_f3"],
-  nun_run: ["nun_run_f0", "nun_run_f1", "nun_run_f2", "nun_run_f3"],
-  quasi_idle: ["quasi_idle_f0", "quasi_idle_f1", "quasi_idle_f2", "quasi_idle_f3"],
-  quasi_run: ["quasi_run_f0", "quasi_run_f1", "quasi_run_f2", "quasi_run_f3"],
-  reaper_idle: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
-  reaper_run: ["necromancer_f0", "necromancer_f1", "necromancer_f2", "necromancer_f3"],
-  assassin_idle: ["assassin_idle_f0", "assassin_idle_f1", "assassin_idle_f2", "assassin_idle_f3"],
-  assassin_run: ["assassin_run_f0", "assassin_run_f1", "assassin_run_f2", "assassin_run_f3"],
-  slave_idle: ["slave_idle_f0", "slave_idle_f1", "slave_idle_f2", "slave_idle_f3"],
-  slave_run: ["slave_run_f0", "slave_run_f1", "slave_run_f2", "slave_run_f3"],
-  monk_idle: ["monk_idle_f0", "monk_idle_f1", "monk_idle_f2", "monk_idle_f3"],
-  monk_run: ["monk_run_f0", "monk_run_f1", "monk_run_f2", "monk_run_f3"],
-  mage_idle: ["wizzard_m_idle_f0", "wizzard_m_idle_f1", "wizzard_m_idle_f2", "wizzard_m_idle_f3"],
-  mage_run: ["wizzard_m_run_f0", "wizzard_m_run_f1", "wizzard_m_run_f2", "wizzard_m_run_f3"],
   orc_grunt_idle: ["orc_grunt_idle_f0", "orc_grunt_idle_f1", "orc_grunt_idle_f2", "orc_grunt_idle_f3"],
   orc_grunt_run: ["orc_grunt_run_f0", "orc_grunt_run_f1", "orc_grunt_run_f2", "orc_grunt_run_f3"],
   goblin_idle: ["goblin_idle_f0", "goblin_idle_f1", "goblin_idle_f2", "goblin_idle_f3"],
@@ -79,9 +62,13 @@ const ANIM = {
   gem: ["xp_gem_f0", "xp_gem_f1"],
   coin: ["coin_f0", "coin_f1", "coin_f2", "coin_f3"],
   bolt: ["shaman_bolt_f0", "shaman_bolt_f1"],
-  slash: ["slash_f0", "slash_f1", "slash_f2"],
 };
-// CraftPix 4-direction orcs + recolor variants (see assets/CREDITS.md)
+// gunner heroes (tools/make_gun_art.py)
+for (const h of ["marine", "slinger", "demo", "heavy", "pyro", "ghost", "medic", "commando", "armorer"]) {
+  ANIM[`${h}_idle`] = [0, 1, 2, 3].map(f => `hero_${h}_idle_f${f}`);
+  ANIM[`${h}_run`] = [0, 1, 2, 3].map(f => `hero_${h}_run_f${f}`);
+}
+// CraftPix 4-direction orcs + recolor variants, all zombified (see assets/CREDITS.md)
 for (const p of ["cp_orc1", "cp_orc2", "cp_orc3", "cp_frost", "cp_night", "cp_blood", "cp_savage", "cp_veteran", "cp_ghost"]) {
   for (const d of ["d", "u", "l", "r"]) {
     ANIM[`${p}_idle_${d}`] = [0, 1, 2, 3].map(f => `${p}_idle_${d}_f${f}`);
@@ -147,14 +134,45 @@ function beep(freq, dur, type = "square", vol = 0.08, slide = 0) {
     o.start(); o.stop(ac.currentTime + dur);
   } catch (e) { /* audio unavailable */ }
 }
+// filtered white noise: the crack of every gunshot and explosion
+let noiseBuf = null;
+function noise(dur, vol, freq = 1800) {
+  if (!SND.sfx) return;
+  try {
+    const ac = audio();
+    if (!noiseBuf) {
+      noiseBuf = ac.createBuffer(1, ac.sampleRate * 0.6, ac.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = noiseBuf;
+    f.type = "lowpass"; f.frequency.value = freq;
+    g.gain.setValueAtTime(vol, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+    src.connect(f).connect(g).connect(ac.destination);
+    src.start(); src.stop(ac.currentTime + dur);
+  } catch (e) { /* audio unavailable */ }
+}
+let lastShotSfx = 0;
+function gunSfx(kind) {
+  const now = performance.now();
+  if (now - lastShotSfx < 45) return; // miniguns would drown everything else
+  lastShotSfx = now;
+  if (kind === "heavy") { noise(0.2, 0.13, 1300); beep(90, 0.12, "square", 0.05, -50); }
+  else if (kind === "rocket") { noise(0.32, 0.08, 700); beep(220, 0.22, "sawtooth", 0.04, -150); }
+  else if (kind === "thump") { noise(0.08, 0.08, 500); beep(160, 0.08, "square", 0.05, -90); }
+  else if (kind === "flame") noise(0.1, 0.03, 900);
+  else { noise(0.07, 0.07, 2600); beep(150, 0.04, "square", 0.03, -70); }
+}
 const SFX = {
-  slash: () => beep(190, 0.09, "sawtooth", 0.05, -120),
   hit: () => beep(120, 0.08, "square", 0.06, -60),
   die: () => beep(70, 0.2, "sawtooth", 0.09, -40),
   gem: () => beep(880, 0.07, "sine", 0.07, 240),
   coinS: () => beep(1180, 0.06, "sine", 0.05, 120),
   hurt: () => beep(90, 0.25, "square", 0.1, -50),
-  boom: () => { beep(60, 0.35, "sawtooth", 0.14, -30); beep(240, 0.18, "square", 0.06, -180); },
+  boom: () => { noise(0.5, 0.16, 520); beep(60, 0.35, "sawtooth", 0.12, -30); },
+  reload: () => { beep(620, 0.04, "square", 0.04); setTimeout(() => beep(880, 0.05, "square", 0.04), 110); },
   level: () => { beep(520, 0.09, "square", 0.06); setTimeout(() => beep(660, 0.09, "square", 0.06), 90); setTimeout(() => beep(880, 0.14, "square", 0.06), 180); },
   card: () => beep(440, 0.08, "triangle", 0.08, 100),
   dash: () => beep(300, 0.1, "sine", 0.05, 300),
@@ -180,8 +198,8 @@ window.addEventListener("keydown", e => {
 window.addEventListener("keyup", e => { keys[e.code] = false; });
 
 // virtual joystick + dash button for touch
-const touchState = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0, maxD: 0, t0: 0 };
-let usingTouch = false, lastPointerTouch = false;
+const touchState = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
+let usingTouch = false;
 const DASH_BTN = { x: VW - 30, y: VH - 30, r: 18 };
 function canvasPos(t) {
   const r = canvas.getBoundingClientRect();
@@ -192,7 +210,6 @@ function canvasPos(t) {
 }
 canvas.addEventListener("pointerdown", e => {
   if (e.pointerType === "touch") usingTouch = true;
-  lastPointerTouch = e.pointerType === "touch";
   const p = canvasPos(e);
   if (passModal.open || (["title", "cls", "select"].includes(G.state) && keyBtnRect &&
       p.x >= keyBtnRect.x - 3 && p.x <= keyBtnRect.x + keyBtnRect.w + 3 &&
@@ -215,23 +232,15 @@ canvas.addEventListener("pointerdown", e => {
   if (handleClick(p.x, p.y)) return;
   touchState.active = true; touchState.id = e.pointerId;
   touchState.ox = p.x; touchState.oy = p.y; touchState.dx = 0; touchState.dy = 0;
-  touchState.maxD = 0; touchState.t0 = performance.now();
 });
 canvas.addEventListener("pointermove", e => {
   if (!touchState.active || e.pointerId !== touchState.id) return;
   const p = canvasPos(e);
   touchState.dx = p.x - touchState.ox; touchState.dy = p.y - touchState.oy;
-  touchState.maxD = Math.max(touchState.maxD, Math.hypot(touchState.dx, touchState.dy));
 });
 window.addEventListener("pointerup", e => {
   if (e.pointerId !== touchState.id) return;
   touchState.active = false;
-  // a quick tap (no drag) casts the mage's next ready spell on touch
-  if (usingTouch && G.state === "play" && !G.paused && player &&
-      WEAPONS[G.weapon].spells && touchState.maxD < 12 &&
-      performance.now() - touchState.t0 < 300) {
-    castNextReady();
-  }
 });
 
 // ------------------------------------------------------------------- util --
@@ -240,6 +249,10 @@ const irnd = (a, b) => Math.floor(rnd(a, b + 1));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+// every HP / damage number the player sees is shown x3.3 (10 dmg reads as 33)
+const NUM_MULT = 3.3;
+const big = v => Math.round(v * NUM_MULT);
+const bigf = v => Math.round(v * NUM_MULT * 10) / 10;
 
 function drawSprite(name, x, y, flip = false, scale = 1, alpha = 1) {
   const im = IMG[name];
@@ -422,65 +435,60 @@ const G = {
   state: "title", // title | play | campfire | gameover | victory
   t: 0, wave: 0, kills: 0, coins: 0, shake: 0, hitPause: 0,
   endless: false,
-  cls: "knight", weapon: "sword",
+  cls: "marine", weapon: "rifle",
   cam: { x: 0, y: 0 },
 };
 
-let player, enemies, gems, coins, flasks, bolts, arrows, stars, molotovs, firePatches, fireballs, beams, missiles, daggers, bossRings, fx, texts, spawnQueue, spawnTimer;
+let player, enemies, gems, coins, flasks, bolts, bullets, grenades, firePatches, bossRings, fx, texts, spawnQueue, spawnTimer;
 let campfire = null; // campfire scene state
 
+// every weapon is a gun: it fires `pellets` projectiles per shot from a clip,
+// then reloads. kind: bullet | rocket (explodes on hit) | grenade (lobbed,
+// explodes where it lands) | flame (short-lived, slows, pierces)
 const WEAPONS = {
-  sword: { name: "Knight Sword", desc: "steady swings, wide arc", sprite: "weapon_regular_sword", dmg: 11, atkSpd: 1.1, range: 38, arc: 1.15 },
-  knives: { name: "Twin Knives", desc: "fast stabs, short reach, +move", sprite: "weapon_knife", dmg: 6, atkSpd: 2.3, range: 28, arc: 1.35 },
-  bow: { name: "Longbow", desc: "10 arrows, then 3s reload", sprite: "weapon_bow", dmg: 8, atkSpd: 2.0, range: 155, arc: 0, ranged: true, clip: 10, reload: 3 },
-  whip: { name: "Whip", desc: "long lash, narrow snap", sprite: "weapon_whip", dmg: 7, atkSpd: 1.6, range: 62, arc: 0.55 },
-  axe: { name: "War Axe", desc: "heavy chop, wide arc", sprite: "weapon_waraxe", dmg: 14, atkSpd: 0.9, range: 35, arc: 1.5 },
-  spear: { name: "Spear", desc: "long thrust, pierces a line", sprite: "weapon_spear", dmg: 10, atkSpd: 1.25, range: 58, arc: 0.45 },
-  scythe: { name: "Scythe", desc: "slow, huge reaping circle", sprite: "weapon_scythe", dmg: 16, atkSpd: 0.8, range: 46, arc: 2.4, unlock: "scythe" },
-  molotov: { name: "Molotov", desc: "lobbed firebomb, burns the ground", sprite: "weapon_molotov", dmg: 14, atkSpd: 0.7, range: 135, arc: 0, thrown: true },
-  shiv: { name: "Small Knife", desc: "quick close shanks", sprite: "weapon_knife", dmg: 5, atkSpd: 2.6, range: 25, arc: 1.2 },
-  katana: { name: "Katana", desc: "swift precise cuts", sprite: "weapon_katana", dmg: 12, atkSpd: 1.4, range: 42, arc: 0.9 },
-  shuriken: { name: "Shuriken", desc: "rapid throwing stars", sprite: "weapon_shuriken", dmg: 5, atkSpd: 2.8, range: 125, arc: 0, star: true },
-  spells: { name: "Arcane Arts", desc: "magic missile + fireball · shockwave · firebeam", sprite: "weapon_red_magic_staff", dmg: 10, atkSpd: 1, range: 165, arc: 0, spells: true },
-  combat: { name: "Bare Hands", desc: "fists, kicks & headbutts", sprite: "slave_idle_f0", dmg: 9, atkSpd: 2.4, range: 22, arc: 1.6, brawl: true },
-  blastdagger: { name: "Blast Dagger", desc: "thrown blade, arcane burst on impact", sprite: "weapon_blast_dagger", dmg: 10, atkSpd: 1.3, range: 140, arc: 0, blast: true },
-};
-
-const SPELLS = {
-  fire: { name: "Fireball", cd: 5 },
-  shock: { name: "Shockwave", cd: 7 },
-  beam: { name: "Firebeam", cd: 10 },
+  pistol: { name: "Pistol", desc: "reliable sidearm, pierces 1", sprite: "gun_pistol", dmg: 10, atkSpd: 2.6, range: 150, clip: 12, reload: 1.2, speed: 340, spread: 0.04, pierce: 1, kind: "bullet", snd: "light" },
+  revolver: { name: "Twin Revolvers", desc: "akimbo six-shooters, pierce 1", sprite: "gun_revolver", dmg: 8, atkSpd: 3.6, range: 145, clip: 12, reload: 1.6, speed: 360, spread: 0.06, pierce: 1, kind: "bullet", akimbo: true, snd: "light" },
+  uzi: { name: "Uzi", desc: "spray and pray, pierces 1", sprite: "gun_uzi", dmg: 3.6, atkSpd: 9, range: 120, clip: 32, reload: 1.6, speed: 330, spread: 0.16, pierce: 1, kind: "bullet", snd: "light" },
+  shotgun: { name: "Shotgun", desc: "7 pellets, brutal up close", sprite: "gun_shotgun", dmg: 4.5, pellets: 7, atkSpd: 1.1, range: 95, clip: 6, reload: 2.0, speed: 320, spread: 0.3, pierce: 1, kind: "bullet", snd: "heavy", kick: 4 },
+  rifle: { name: "Assault Rifle", desc: "fast, accurate, pierces 2", sprite: "gun_rifle", dmg: 5.5, atkSpd: 5, range: 165, clip: 30, reload: 1.8, speed: 380, spread: 0.06, pierce: 2, kind: "bullet", snd: "light" },
+  sniper: { name: "Sniper Rifle", desc: "slow, huge damage, pierces 4", sprite: "gun_sniper", dmg: 22, atkSpd: 0.8, range: 240, clip: 5, reload: 2.2, speed: 620, spread: 0, pierce: 4, kind: "bullet", snd: "heavy", kick: 4 },
+  minigun: { name: "Minigun", desc: "pierces 1, slows you down", sprite: "gun_minigun", dmg: 3, atkSpd: 14, range: 140, clip: 120, reload: 3.4, speed: 360, spread: 0.2, pierce: 1, kind: "bullet", move: 0.85, snd: "light" },
+  rocket: { name: "Rocket Launcher", desc: "rockets explode on impact", sprite: "gun_rocket", dmg: 16, atkSpd: 0.8, range: 175, clip: 3, reload: 2.6, speed: 210, spread: 0.02, kind: "rocket", blast: 34, snd: "rocket", kick: 5 },
+  grenade: { name: "Grenade Launcher", desc: "lobbed explosive shells", sprite: "gun_grenade", dmg: 11, atkSpd: 1.2, range: 150, clip: 6, reload: 2.2, kind: "grenade", blast: 30, snd: "thump", kick: 3 },
+  incendiary: { name: "Firebomb Launcher", desc: "shells set the ground ablaze", sprite: "gun_grenade", dmg: 8, atkSpd: 1.0, range: 140, clip: 4, reload: 2.4, kind: "grenade", blast: 26, fire: true, snd: "thump", kick: 3 },
+  flamer: { name: "Flamethrower", desc: "short cone, burns crowds", sprite: "gun_flamer", dmg: 1.1, atkSpd: 16, range: 70, clip: 100, reload: 2.6, speed: 150, spread: 0.22, pierce: 99, kind: "flame", snd: "flame" },
+  m60: { name: "M60", desc: "belt-fed, rounds pierce 2", sprite: "gun_m60", dmg: 3.6, atkSpd: 7, range: 170, clip: 80, reload: 3.2, speed: 400, spread: 0.1, pierce: 2, kind: "bullet", snd: "light" },
+  golden: { name: "Golden Deagle", desc: "hand cannon, pierces 6", sprite: "gun_golden", dmg: 24, atkSpd: 1.5, range: 200, clip: 7, reload: 1.4, speed: 700, spread: 0, pierce: 6, kind: "bullet", snd: "heavy", kick: 4 },
 };
 
 // classes -------------------------------------------------------------------
 const CLASSES = {
-  knight: { name: "Knight", anim: "hero", desc: "balanced, dependable", weapons: ["sword", "spear", "bow"], mods: s => s },
-  barbar: { name: "Barbarian", anim: "barbar", desc: "+25% dmg, +10% speed, takes +15% dmg", unlock: "barbar",
-    weapons: ["knives", "spear", "axe"],
-    mods: s => { s.dmg *= 1.25; s.moveSpd *= 1.10; s.armor = 1 - (1 - s.armor) * 1.15; s.maxHp = 70; } },
-  nun: { name: "Nun", anim: "nun", desc: "+1.2 HP/s, +20% XP, -15% dmg", unlock: "nun",
-    weapons: ["whip", "bow"],
-    mods: s => { s.regen += 1.2; s.xpGain *= 1.20; s.dmg *= 0.85; s.maxHp = 55; } },
-  quasi: { name: "Quasimodo", anim: "quasi", desc: "hunched & hardy: 75 HP, a bit slow", weapons: ["molotov", "shiv"],
-    mods: s => { s.maxHp = 75; s.moveSpd *= 0.95; } },
-  assassin: { name: "Assassin", anim: "assassin", desc: "+15% crit, +10% speed, 50 HP", unlock: "assassin", price: 400,
-    weapons: ["katana", "shuriken"],
-    mods: s => { s.crit += 0.15; s.moveSpd *= 1.10; s.maxHp = 50; } },
-  reaper: { name: "Reaper", anim: "reaper", desc: "+10% dmg, 2% lifesteal, frail", unlock: "reaper", price: 600,
-    weapons: ["scythe", "knives"],
-    mods: s => { s.dmg *= 1.10; s.lifesteal += 0.02; s.maxHp = 45; s.moveSpd *= 1.05; } },
-  mage: { name: "Mage", anim: "mage", desc: "auto missile + 3 click-cast spells", unlock: "mage", price: 900,
-    weapons: ["spells", "blastdagger"],
-    mods: s => { s.maxHp = 55; } },
-  slave: { name: "Slave", anim: "slave", desc: "unchained: fast fists, kicks & headbutts", unlock: "slave", secret: true,
-    weapons: ["combat"],
-    mods: s => { s.moveSpd *= 1.22; s.maxHp = 55; } },
-  monk: { name: "Monk", anim: "monk", desc: "dev tester — masters every weapon", devOnly: true,
+  marine: { name: "Marine", anim: "marine", desc: "balanced, by the book", weapons: ["rifle", "pistol", "shotgun"], mods: s => s },
+  slinger: { name: "Gunslinger", anim: "slinger", desc: `+10% crit, +8% speed, ${big(50)} HP`,
+    weapons: ["revolver", "shotgun"],
+    mods: s => { s.crit += 0.10; s.moveSpd *= 1.08; s.maxHp = 50; } },
+  demo: { name: "Demolitionist", anim: "demo", desc: `+30% blast radius, ${big(65)} HP`, unlock: "demo", price: 300,
+    weapons: ["rocket", "grenade"],
+    mods: s => { s.blast *= 1.30; s.maxHp = 65; } },
+  heavy: { name: "Heavy", anim: "heavy", desc: `${big(85)} HP, -10% dmg taken, slow`, unlock: "heavy", price: 300,
+    weapons: ["minigun", "shotgun"],
+    mods: s => { s.maxHp = 85; s.armor = 1 - (1 - s.armor) * 0.90; s.moveSpd *= 0.90; } },
+  pyro: { name: "Pyro", anim: "pyro", desc: `+20% dmg, burns everything, ${big(55)} HP`, unlock: "pyro", price: 400,
+    weapons: ["flamer", "incendiary"],
+    mods: s => { s.dmg *= 1.20; s.maxHp = 55; } },
+  medic: { name: "Medic", anim: "medic", desc: `+${bigf(1.2)} HP/s, 3% lifesteal, -15% dmg`, unlock: "medic", price: 500,
+    weapons: ["uzi", "pistol"],
+    mods: s => { s.regen += 1.2; s.lifesteal += 0.03; s.dmg *= 0.85; s.maxHp = 55; } },
+  ghost: { name: "Ghost", anim: "ghost", desc: `+15% crit, +20% range, ${big(45)} HP`, unlock: "ghost", price: 600,
+    weapons: ["sniper", "uzi"],
+    mods: s => { s.crit += 0.15; s.range *= 1.20; s.maxHp = 45; } },
+  commando: { name: "Commando", anim: "commando", desc: "one-man army: +15% speed, belt-fed M60", unlock: "commando", secret: true,
+    weapons: ["m60", "golden"],
+    mods: s => { s.moveSpd *= 1.15; s.maxHp = 60; } },
+  armorer: { name: "Armorer", anim: "armorer", desc: "dev tester — carries every gun", devOnly: true,
     weapons: Object.keys(WEAPONS),
     mods: s => { s.maxHp = 65; } },
 };
-CLASSES.barbar.price = 300;
-CLASSES.nun.price = 300;
 
 // persistent gold bank — coins left at the end of a run are deposited here
 // and spent on unlocking classes
@@ -501,7 +509,7 @@ function bankCoins() {
 }
 
 // unlocks persist across runs (best-effort; storage may be unavailable)
-const UN = { barbar: false, nun: false, reaper: false, scythe: false, assassin: false, mage: false, slave: false };
+const UN = { demo: false, heavy: false, pyro: false, medic: false, ghost: false, commando: false };
 
 // secret classes never show in the menu until earned; devOnly need dev mode
 function visibleClasses() {
@@ -581,11 +589,12 @@ function baseStats(weaponId) {
   const w = WEAPONS[weaponId];
   return {
     maxHp: 60, dmg: w.dmg * (1 + 0.08 * wpnLevel(weaponId)), atkSpd: w.atkSpd,
-    moveSpd: weaponId === "knives" ? 93 : 85,
-    range: w.range, arc: w.arc,
+    moveSpd: 85 * (w.move || 1),
+    range: w.range,
     crit: 0.05, regen: 0, magnet: 28, xpGain: 1,
     armor: 0, lifesteal: 0,
     knock: 1, giant: 0, goldDig: 0, wind: 0, luck: 0,
+    clipMul: 1, reloadMul: 1, blast: 1,
   };
 }
 
@@ -599,15 +608,15 @@ function newRun(weaponId) {
     stats, banked: 0,
     facing: 1, moving: false, animT: 0,
     atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
-    flash: 0, ammo: WEAPONS[weaponId].clip || 0, reloadT: 0,
+    flash: 0, ammo: 0, reloadT: 0, recoil: 0, lastShot: -9, akimboSide: 1,
   };
-  enemies = []; gems = []; coins = []; flasks = []; bolts = []; arrows = []; stars = []; molotovs = []; firePatches = []; fireballs = []; beams = []; missiles = []; daggers = []; bossRings = []; fx = []; texts = [];
-  player.spellCd = { fire: 0, shock: 0, beam: 0 };
+  player.ammo = clipSize();
+  enemies = []; gems = []; coins = []; flasks = []; bolts = []; bullets = []; grenades = []; firePatches = []; bossRings = []; fx = []; texts = [];
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
   G.sayQ = []; G.kingSeen = false; G.saidLowHp = false;
-  say("They dragged the King into this cave…", 1.2);
-  say("I will find him. I swear it.", 4.2);
+  say("The dead dragged the King into this cave…", 1.2);
+  say("I will find him. Locked and loaded.", 4.2);
   startWave(1);
   G.state = "play";
 }
@@ -621,68 +630,68 @@ function say(s, delay = 0) {
 }
 
 function bossLine(type) {
-  if (type === "orc_butcher") {
-    return G.kingSeen ? "The Butcher dies for what they did!" : "Oh no… I must survive — for the King!";
+  if (type === "butcher") {
+    return G.kingSeen ? "The Butcher rots for what they did!" : "That thing is huge… hold on, for the King!";
   }
-  if (type === "warchief") {
-    return G.kingSeen ? "Warchief! You hanged my King!" : "The Warchief himself… hold on, for the King!";
+  if (type === "patient_zero") {
+    return G.kingSeen ? "Patient Zero! You turned my King!" : "Patient Zero… where the plague began.";
   }
-  if (type === "orc_soulcaller") {
+  if (type === "necromancer") {
     return "He raises the dead… stay strong, for the King!";
   }
-  if (type === "orc_god") {
-    return "Their god walks… but my King watches over me!";
+  if (type === "rot_god") {
+    return "Their god crawls out… but my King watches over me!";
   }
-  return "A false king of shamans… mine was worth ten of you.";
+  return "A king of bile… mine was worth ten of you.";
 }
 
 // ------------------------------------------------------------------ waves --
 const E_TYPES = {
-  goblin: { anim: "goblin", hp: 9, spd: 55, dmg: 5, xp: 1, r: 4, scale: 1, score: 1 },
-  orc_warrior: { anim: "orc_grunt", hp: 22, spd: 34, dmg: 9, xp: 2, r: 5, scale: 1, score: 2 },
-  orc_blade: { dirAnim: "cp_orc3", hp: 15, spd: 62, dmg: 8, xp: 3, r: 5, scale: 1, score: 3 },
-  orc_general: { dirAnim: "cp_orc2", hp: 70, spd: 28, dmg: 14, xp: 6, r: 6, scale: 1, score: 6 },
-  frost_orc: { dirAnim: "cp_frost", hp: 45, spd: 24, dmg: 12, xp: 4, r: 5, scale: 1, score: 4 },
-  night_orc: { dirAnim: "cp_night", hp: 16, spd: 74, dmg: 9, xp: 4, r: 5, scale: 1, score: 4 },
-  blood_general: { dirAnim: "cp_blood", hp: 120, spd: 32, dmg: 17, xp: 8, r: 6, scale: 1, score: 8 },
-  masked_orc: { anim: "masked_orc", hp: 16, spd: 58, dmg: 7, xp: 2, r: 5, scale: 1, score: 2 },
-  orc_shaman: { anim: "orc_shaman", hp: 14, spd: 30, dmg: 7, xp: 3, r: 5, scale: 1, ranged: true, score: 3 },
-  orc_berserker: { anim: "orc_berserker", hp: 30, spd: 40, dmg: 11, xp: 4, r: 5, scale: 1, rage: true, score: 4 },
-  cave_goblin: { anim: "cave_goblin", hp: 6, spd: 68, dmg: 4, xp: 1, r: 4, scale: 1, score: 1 },
-  orc_savage: { dirAnim: "cp_savage", hp: 18, spd: 46, dmg: 8, xp: 2, r: 5, scale: 1, score: 2 },
-  orc_veteran: { dirAnim: "cp_veteran", hp: 48, spd: 30, dmg: 12, xp: 5, r: 6, scale: 1, score: 5 },
-  ghost_orc: { dirAnim: "cp_ghost", hp: 10, spd: 72, dmg: 6, xp: 1, r: 4, scale: 1, ghost: true, score: 2 },
-  ogre: { anim: "ogre", hp: 150, spd: 22, dmg: 18, xp: 12, r: 10, scale: 1, big: true, score: 10 },
-  warchief: { anim: "warchief", hp: 750, spd: 30, dmg: 22, xp: 40, r: 9, scale: 2, boss: true, bossBar: true, big: true, score: 50 },
-  orc_butcher: { anim: "butcher", hp: 300, spd: 32, dmg: 20, xp: 20, r: 10, scale: 2, big: true, bossBar: true, charge: true, score: 30 },
-  orc_shamanking: { anim: "shamanking", hp: 340, spd: 26, dmg: 10, xp: 25, r: 8, scale: 2, big: true, bossBar: true, ranged: true, king: true, score: 40 },
-  orc_soulcaller: { anim: "soulcaller", hp: 380, spd: 24, dmg: 14, xp: 30, r: 8, scale: 2, big: true, bossBar: true, souls: true, score: 45 },
-  orc_god: { anim: "orcgod", hp: 900, spd: 20, dmg: 26, xp: 80, r: 12, scale: 2.2, big: true, bossBar: true, god: true, score: 100 },
+  crawler: { anim: "goblin", hp: 9, spd: 55, dmg: 5, xp: 1, r: 4, scale: 1, score: 1 },
+  walker: { anim: "orc_grunt", hp: 22, spd: 34, dmg: 9, xp: 2, r: 5, scale: 1, score: 2 },
+  sprinter: { dirAnim: "cp_orc3", hp: 15, spd: 62, dmg: 8, xp: 3, r: 5, scale: 1, score: 3 },
+  brute: { dirAnim: "cp_orc2", hp: 70, spd: 28, dmg: 14, xp: 6, r: 6, scale: 1, score: 6 },
+  frozen: { dirAnim: "cp_frost", hp: 45, spd: 24, dmg: 12, xp: 4, r: 5, scale: 1, score: 4 },
+  stalker: { dirAnim: "cp_night", hp: 16, spd: 74, dmg: 9, xp: 4, r: 5, scale: 1, score: 4 },
+  gorehulk: { dirAnim: "cp_blood", hp: 120, spd: 32, dmg: 17, xp: 8, r: 6, scale: 1, score: 8 },
+  masked: { anim: "masked_orc", hp: 16, spd: 58, dmg: 7, xp: 2, r: 5, scale: 1, score: 2 },
+  spitter: { anim: "orc_shaman", hp: 14, spd: 30, dmg: 7, xp: 3, r: 5, scale: 1, ranged: true, score: 3 },
+  rager: { anim: "orc_berserker", hp: 30, spd: 40, dmg: 11, xp: 4, r: 5, scale: 1, rage: true, score: 4 },
+  runt: { anim: "cave_goblin", hp: 6, spd: 68, dmg: 4, xp: 1, r: 4, scale: 1, score: 1 },
+  feral: { dirAnim: "cp_savage", hp: 18, spd: 46, dmg: 8, xp: 2, r: 5, scale: 1, score: 2 },
+  dead_soldier: { dirAnim: "cp_veteran", hp: 48, spd: 30, dmg: 12, xp: 5, r: 6, scale: 1, score: 5 },
+  wraith: { dirAnim: "cp_ghost", hp: 10, spd: 72, dmg: 6, xp: 1, r: 4, scale: 1, ghost: true, score: 2 },
+  tank: { anim: "ogre", hp: 150, spd: 22, dmg: 18, xp: 12, r: 10, scale: 1, big: true, score: 10 },
+  patient_zero: { anim: "warchief", hp: 750, spd: 30, dmg: 22, xp: 40, r: 9, scale: 2, boss: true, bossBar: true, big: true, score: 50 },
+  butcher: { anim: "butcher", hp: 300, spd: 32, dmg: 20, xp: 20, r: 10, scale: 2, big: true, bossBar: true, charge: true, score: 30 },
+  bile_king: { anim: "shamanking", hp: 340, spd: 26, dmg: 10, xp: 25, r: 8, scale: 2, big: true, bossBar: true, ranged: true, king: true, score: 40 },
+  necromancer: { anim: "soulcaller", hp: 380, spd: 24, dmg: 14, xp: 30, r: 8, scale: 2, big: true, bossBar: true, souls: true, score: 45 },
+  rot_god: { anim: "orcgod", hp: 900, spd: 20, dmg: 26, xp: 80, r: 12, scale: 2.2, big: true, bossBar: true, god: true, score: 100 },
 };
 
-const BOSS_CYCLE = ["orc_butcher", "warchief", "orc_soulcaller", "orc_god", "orc_shamanking"];
-const BOSS_NAMES = { orc_butcher: "THE BUTCHER", warchief: "THE WARCHIEF", orc_soulcaller: "THE SOULCALLER", orc_god: "GROMMOK, THE ORC GOD", orc_shamanking: "THE SHAMAN KING" };
+const BOSS_CYCLE = ["butcher", "patient_zero", "necromancer", "rot_god", "bile_king"];
+const BOSS_NAMES = { butcher: "THE BUTCHER", patient_zero: "PATIENT ZERO", necromancer: "THE NECROMANCER", rot_god: "MORGRAX, THE ROT GOD", bile_king: "THE BILE KING" };
 const bossFor = w => BOSS_CYCLE[(Math.floor(w / 5) - 1 + BOSS_CYCLE.length) % BOSS_CYCLE.length];
 
 function waveComposition(w) {
   const list = [];
   const add = (type, n) => { for (let i = 0; i < n; i++) list.push(type); };
-  add("goblin", clamp(8 + w * 2, 0, 26));
-  add("cave_goblin", 3 + w);
-  if (w >= 1) add("orc_warrior", 2 + Math.floor(w * 1.6));
-  if (w >= 2) add("orc_savage", w);
-  if (w >= 3) add("orc_blade", w);
-  if (w >= 3) add("masked_orc", w - 1);
-  if (w >= 6) add("orc_veteran", Math.floor(w / 3));
-  if (w >= 4) add("orc_shaman", Math.floor(w / 2) + 1);
-  if (w >= 5) add("orc_berserker", w - 3);
-  if (w >= 5) add("frost_orc", Math.floor(w / 2) - 1);
-  if (w >= 6) add("orc_general", Math.floor(w / 3));
-  if (w >= 7) add("night_orc", w - 5);
-  if (w >= 8) add("ogre", Math.floor(w / 8));
-  if (w >= 9) add("blood_general", Math.floor(w / 4));
+  add("crawler", clamp(8 + w * 2, 0, 26));
+  add("runt", 3 + w);
+  if (w >= 1) add("walker", 2 + Math.floor(w * 1.6));
+  if (w >= 2) add("feral", w);
+  if (w >= 3) add("sprinter", w);
+  if (w >= 3) add("masked", w - 1);
+  if (w >= 6) add("dead_soldier", Math.floor(w / 3));
+  if (w >= 4) add("spitter", Math.floor(w / 2) + 1);
+  if (w >= 5) add("rager", w - 3);
+  if (w >= 5) add("frozen", Math.floor(w / 2) - 1);
+  if (w >= 6) add("brute", Math.floor(w / 3));
+  if (w >= 7) add("stalker", w - 5);
+  if (w >= 8) add("tank", Math.floor(w / 8));
+  if (w >= 9) add("gorehulk", Math.floor(w / 4));
   if (w % 5 === 0) add(bossFor(w), 1); // a boss every 5th wave
-  if (w > FINAL_WAVE) { add("orc_berserker", w - 8); add("night_orc", w - 8); }
+  if (w > FINAL_WAVE) { add("rager", w - 8); add("stalker", w - 8); }
   return list;
 }
 
@@ -697,9 +706,9 @@ function startWave(w) {
   const bossWave = w % 5 === 0;
   texts.push({ x: player.x, y: player.y - 40, s: bossWave ? `${BOSS_NAMES[bossFor(w)]} COMES` : "WAVE " + w, life: 2.2, col: bossWave ? "#ff6b6b" : "#ffd166", big: true });
   if (bossWave) { SFX.bossRoar(); say(bossLine(bossFor(w)), 1.4); }
-  if (w >= 10 && (!UN.scythe || !UN.reaper)) {
-    UN.scythe = true; UN.reaper = true; saveUnlocks();
-    texts.push({ x: player.x, y: player.y - 56, s: "SCYTHE & REAPER UNLOCKED!", life: 3, col: "#b48cff", big: true });
+  if (w >= 10 && !UN.ghost) {
+    UN.ghost = true; saveUnlocks();
+    texts.push({ x: player.x, y: player.y - 56, s: "GHOST UNLOCKED!", life: 3, col: "#b48cff", big: true });
     SFX.level();
   }
 }
@@ -749,33 +758,37 @@ const RARITY = {
   legendary: { name: "LEGENDARY", col: "#ffd166", w: 3 },
 };
 
+// `need`: only offered when the current gun has that property
 const CARD_POOL = [
   // common
-  { id: "dmg", r: "common", name: "Sharpened Edge", desc: "+10% damage", icon: "weapon_waraxe", max: 7, apply: s => s.dmg *= 1.10 },
-  { id: "mov", r: "common", name: "Swift Boots", desc: "+6% move speed", icon: "flask_big_green", max: 5, apply: s => s.moveSpd *= 1.06 },
-  { id: "hp", r: "common", name: "Orcish Vigor", desc: "+12% max HP, heal 10", icon: "flask_big_red", max: 7, apply: s => { s.maxHp = Math.round(s.maxHp * 1.12); player.hp = Math.min(s.maxHp, player.hp + 10); } },
-  { id: "stone", r: "common", name: "Stone Skin", desc: "+16 max HP", icon: "wall_mid", max: 5, apply: s => s.maxHp += 16 },
-  { id: "knock", r: "common", name: "Heavy Blows", desc: "+35% knockback", icon: "weapon_mace", max: 4, apply: s => s.knock *= 1.35 },
-  { id: "mag", r: "common", name: "Greedy Hands", desc: "+30% pickup range", icon: "coin_f0", max: 4, apply: s => s.magnet *= 1.30 },
+  { id: "dmg", r: "common", name: "Hollow Points", desc: "+10% damage", icon: "gun_pistol", max: 7, apply: s => s.dmg *= 1.10 },
+  { id: "mov", r: "common", name: "Running Shoes", desc: "+6% move speed", icon: "flask_big_green", max: 5, apply: s => s.moveSpd *= 1.06 },
+  { id: "hp", r: "common", name: "Adrenaline", desc: `+12% max HP, heal ${big(10)}`, icon: "flask_big_red", max: 7, apply: s => { s.maxHp = Math.round(s.maxHp * 1.12); player.hp = Math.min(s.maxHp, player.hp + 10); } },
+  { id: "stone", r: "common", name: "Kevlar Plates", desc: `+${big(16)} max HP`, icon: "wall_mid", max: 5, apply: s => s.maxHp += 16 },
+  { id: "knock", r: "common", name: "Stopping Power", desc: "+35% knockback", icon: "gun_shotgun", max: 4, apply: s => s.knock *= 1.35 },
+  { id: "mag", r: "common", name: "Scavenger", desc: "+30% pickup range", icon: "coin_f0", max: 4, apply: s => s.magnet *= 1.30 },
   // rare
-  { id: "spd", r: "rare", name: "Battle Rage", desc: "+8% attack speed", icon: "slash_f1", max: 7, apply: s => s.atkSpd *= 1.08 },
-  { id: "reg", r: "rare", name: "Campfire Warmth", desc: "+0.5 HP/s regen", icon: "campfire_f0", max: 5, apply: s => s.regen += 0.5 },
-  { id: "cry", r: "rare", name: "War Cry", desc: "+6% damage, +4% attack speed", icon: "weapon_throwing_axe", max: 5, apply: s => { s.dmg *= 1.06; s.atkSpd *= 1.04; } },
+  { id: "spd", r: "rare", name: "Trigger Finger", desc: "+8% fire rate", icon: "gun_uzi", max: 7, apply: s => s.atkSpd *= 1.08 },
+  { id: "reg", r: "rare", name: "Field Bandage", desc: `+${bigf(0.5)} HP/s regen`, icon: "campfire_f0", max: 5, apply: s => s.regen += 0.5 },
+  { id: "cry", r: "rare", name: "Battle Cry", desc: "+6% damage, +4% fire rate", icon: "gun_rifle", max: 5, apply: s => { s.dmg *= 1.06; s.atkSpd *= 1.04; } },
   { id: "xp", r: "rare", name: "Trophy Hunter", desc: "+15% XP gained", icon: "xp_gem_f0", max: 4, apply: s => s.xpGain *= 1.15 },
-  { id: "rng", r: "rare", name: "Long Arms", desc: "+10% attack range", icon: "slash_f0", max: 3, apply: s => s.range *= 1.10 },
+  { id: "rng", r: "rare", name: "Long Barrel", desc: "+10% range", icon: "gun_sniper", max: 3, apply: s => s.range *= 1.10 },
   { id: "gold", r: "rare", name: "Gold Digger", desc: "+35% coin drops", icon: "coin_f2", max: 3, apply: s => s.goldDig += 0.35 },
+  { id: "clip", r: "rare", name: "Extended Mags", desc: "+25% magazine size", icon: "gun_m60", max: 4, apply: s => s.clipMul *= 1.25 },
+  { id: "rel", r: "rare", name: "Fast Hands", desc: "-15% reload time", icon: "gun_revolver", max: 4, apply: s => s.reloadMul *= 0.85 },
   // epic
-  { id: "crit", r: "epic", name: "Keen Eye", desc: "+6% crit chance (2x)", icon: "weapon_anime_sword", max: 5, apply: s => s.crit += 0.06 },
-  { id: "arm", r: "epic", name: "Iron Hide", desc: "-8% damage taken", icon: "crate", max: 5, apply: s => s.armor = 1 - (1 - s.armor) * 0.92 },
+  { id: "crit", r: "epic", name: "Laser Sight", desc: "+6% crit chance (2x)", icon: "gun_pistol", max: 5, apply: s => s.crit += 0.06 },
+  { id: "arm", r: "epic", name: "Riot Armor", desc: "-8% damage taken", icon: "crate", max: 5, apply: s => s.armor = 1 - (1 - s.armor) * 0.92 },
   { id: "vamp", r: "epic", name: "Blood Pact", desc: "2% lifesteal", icon: "skull", max: 4, apply: s => s.lifesteal += 0.02 },
-  { id: "giant", r: "epic", name: "Giant Slayer", desc: "+20% damage vs big orcs", icon: "weapon_hammer", max: 3, apply: s => s.giant += 0.20 },
+  { id: "giant", r: "epic", name: "Big Game Hunter", desc: "+20% damage vs big zombies", icon: "gun_rocket", max: 3, apply: s => s.giant += 0.20 },
   { id: "wind", r: "epic", name: "Second Wind", desc: "+15% campfire healing", icon: "campfire_f2", max: 3, apply: s => s.wind += 0.15 },
   { id: "luck", r: "epic", name: "Lucky Charm", desc: "rarer cards appear more often", icon: "flask_big_yellow", max: 3, apply: s => s.luck += 0.5 },
+  { id: "boom", r: "epic", name: "Bigger Boom", desc: "+20% blast radius", icon: "proj_grenade", max: 3, need: "blast", apply: s => s.blast *= 1.20 },
   // legendary
-  { id: "ldmg", r: "legendary", name: "Warlord's Edge", desc: "+25% damage", icon: "weapon_golden_sword", max: 3, apply: s => s.dmg *= 1.25 },
-  { id: "lspd", r: "legendary", name: "Bloodlust", desc: "+20% attack speed", icon: "weapon_saw_sword", max: 3, apply: s => s.atkSpd *= 1.20 },
+  { id: "ldmg", r: "legendary", name: "Depleted Uranium", desc: "+25% damage", icon: "gun_golden", max: 3, apply: s => s.dmg *= 1.25 },
+  { id: "lspd", r: "legendary", name: "Bullet Hell", desc: "+20% fire rate", icon: "gun_minigun", max: 3, apply: s => s.atkSpd *= 1.20 },
   { id: "lvamp", r: "legendary", name: "Vampire Lord", desc: "+5% lifesteal", icon: "skull", max: 2, apply: s => s.lifesteal += 0.05 },
-  { id: "lcrit", r: "legendary", name: "Deathmark", desc: "+15% crit chance", icon: "weapon_katana", max: 2, apply: s => s.crit += 0.15 },
+  { id: "lcrit", r: "legendary", name: "Deathmark", desc: "+15% crit chance", icon: "gun_sniper", max: 2, apply: s => s.crit += 0.15 },
 ];
 let cardCounts = {};
 
@@ -794,10 +807,11 @@ function rollRarity(luck) {
   return "common";
 }
 
-const cardsAvailable = () => CARD_POOL.some(c => (cardCounts[c.id] || 0) < c.max);
+const cardOk = c => (cardCounts[c.id] || 0) < c.max && (!c.need || WEAPONS[G.weapon][c.need]);
+const cardsAvailable = () => CARD_POOL.some(cardOk);
 
 function drawThreeCards() {
-  const avail = CARD_POOL.filter(c => (cardCounts[c.id] || 0) < c.max);
+  const avail = CARD_POOL.filter(cardOk);
   const opts = [];
   const order = ["common", "rare", "epic", "legendary"];
   for (let slot = 0; slot < 3 && avail.length; slot++) {
@@ -868,7 +882,7 @@ function shopHeal() {
   if (player.hp >= player.stats.maxHp - 0.5) return toast("already at full health");
   G.coins -= HEAL_COST;
   player.hp = Math.min(player.stats.maxHp, player.hp + player.stats.maxHp * 0.5);
-  toast("+" + Math.round(player.stats.maxHp * 0.5) + " HP");
+  toast("+" + big(player.stats.maxHp * 0.5) + " HP");
   SFX.gem();
 }
 function shopExtraPick() {
@@ -897,7 +911,7 @@ function damageEnemy(e, dmg, crit) {
   if (e.big && player.stats.giant) dmg *= 1 + player.stats.giant;
   e.hp -= dmg;
   e.hitFlash = 0.1;
-  texts.push({ x: e.x + rnd(-4, 4), y: e.y - 14 * e.scale, s: String(Math.round(dmg)), life: 0.6, col: crit ? "#ffd166" : "#fff" });
+  texts.push({ x: e.x + rnd(-4, 4), y: e.y - 14 * e.scale, s: String(big(dmg)), life: 0.6, col: crit ? "#ffd166" : "#fff" });
   if (player.stats.lifesteal > 0) {
     player.hp = Math.min(player.stats.maxHp, player.hp + dmg * player.stats.lifesteal);
   }
@@ -921,7 +935,7 @@ function killEnemy(e) {
   for (let i = 0; i < coinCount; i++) coins.push({ x: e.x + rnd(-6, 6), y: e.y + rnd(-4, 4), t: rnd(0, 9), vx: rnd(-25, 25), vy: rnd(-50, -20) });
   if (Math.random() < (e.big ? 0.8 : 0.04)) flasks.push({ x: e.x, y: e.y, t: 0 });
   if (e.big && Math.random() < 0.001) { // 0.1% relic drop from bosses
-    const locked = ["barbar", "nun"].filter(c => !UN[c]);
+    const locked = ["demo", "heavy"].filter(c => !UN[c]);
     if (locked.length) {
       const c = pick(locked);
       UN[c] = true; saveUnlocks();
@@ -935,215 +949,120 @@ function killEnemy(e) {
   }
 }
 
-function playerMeleeAttack() {
-  const st = player.stats;
-  const target = nearestEnemy(player, st.range + 14);
-  if (!target) return;
-  player.atkCd = 1 / st.atkSpd;
-  const ang = Math.atan2(target.y - player.y, target.x - player.x);
-  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-  player.atkAng = ang;
-  const wdef = WEAPONS[G.weapon];
-  let brawlHeadbutt = false;
-  if (wdef.brawl) { // bare hands cycle punch -> kick -> HEADBUTT
-    player.brawlN = ((player.brawlN || 0) + 1) % 3;
-    brawlHeadbutt = player.brawlN === 0;
-    // lunge into the blow
-    const lunge = brawlHeadbutt ? 6 : 3;
-    player.x += Math.cos(ang) * lunge; player.y += Math.sin(ang) * lunge;
-    fx.push({ kind: "slash", x: player.x + Math.cos(ang) * 10, y: player.y + Math.sin(ang) * 10 - 6, ang, life: 0.14, max: 0.14, scale: 0.7 });
-    if (brawlHeadbutt) beep(140, 0.1, "square", 0.09, -70);
-  } else if (G.weapon === "whip") {
-    fx.push({ kind: "whip", ang, life: 0.18, max: 0.18 });
-  } else if (G.weapon !== "spear") { // spear's thrust is the held weapon itself
-    fx.push({ kind: "slash", x: player.x + Math.cos(ang) * 14, y: player.y + Math.sin(ang) * 14 - 6, ang, life: 0.18, max: 0.18, scale: G.weapon === "scythe" ? 1.7 : 1 });
-  }
-  SFX.slash();
-  let bonked = false;
-  for (const e of [...enemies]) {
-    if (e.warmup > 0) continue;
-    const d = dist(player, e);
-    if (d > st.range + e.r + 6) continue;
-    const ea = Math.atan2(e.y - player.y, e.x - player.x);
-    let diff = Math.abs(ea - ang);
-    if (diff > Math.PI) diff = Math.PI * 2 - diff;
-    if (diff < st.arc) {
-      const crit = Math.random() < st.crit;
-      const mult = brawlHeadbutt ? 1.5 : 1;
-      damageEnemy(e, st.dmg * mult * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
-      // knockback (a headbutt sends them flying)
-      const kb = 6 * st.knock * (brawlHeadbutt ? 2.2 : 1);
-      e.x += Math.cos(ea) * kb; e.y += Math.sin(ea) * kb;
-      if (brawlHeadbutt && !bonked && enemies.includes(e)) {
-        bonked = true;
-        texts.push({ x: e.x, y: e.y - 16, s: "BONK!", life: 0.5, col: "#ffd166" });
-      }
-    }
-  }
-}
+const clipSize = () => Math.max(1, Math.round(WEAPONS[G.weapon].clip * player.stats.clipMul));
+const handPos = () => ({ x: player.x + player.facing * 2, y: player.y - 8 });
+const aiming = () => G.t - player.lastShot < 0.8;
 
-function playerMolotovAttack() {
-  const st = player.stats;
+function fireGun() {
+  const st = player.stats, w = WEAPONS[G.weapon];
   const target = nearestEnemy(player, st.range);
   if (!target) return;
   player.atkCd = 1 / st.atkSpd;
-  const ang = Math.atan2(target.y - player.y, target.x - player.x);
+  const hand = handPos();
+  const ang = Math.atan2(target.y - 4 - hand.y, target.x - hand.x);
   player.facing = Math.cos(ang) >= 0 ? 1 : -1;
   player.atkAng = ang;
-  const d = dist(player, target);
-  molotovs.push({
-    sx: player.x, sy: player.y - 10, tx: target.x, ty: target.y,
-    x: player.x, y: player.y - 10, t: 0, dur: clamp(d / 150, 0.45, 1.0), spin: 0,
-  });
-  SFX.slash();
-}
-
-function explodeMolotov(m) {
-  const st = player.stats;
-  SFX.boom();
-  G.shake = Math.max(G.shake, 4);
-  firePatches.push({ x: m.tx, y: m.ty, life: 2.4, max: 2.4, tick: 0, seed: Math.random() * 9 });
-  for (const e of [...enemies]) {
-    if (e.warmup > 0) continue;
-    if (Math.hypot(e.x - m.tx, e.y - m.ty) < 30 + e.r) {
-      const crit = Math.random() < st.crit;
-      damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+  player.lastShot = G.t;
+  player.recoil = w.kick || 1.5;
+  player.akimboSide = -player.akimboSide;
+  // muzzle sits a gun-length out from the (re-faced) hand
+  const h2 = handPos(), len = IMG[w.sprite].width - 3;
+  const mz = { x: h2.x + Math.cos(ang) * len, y: h2.y + Math.sin(ang) * len + (w.akimbo ? player.akimboSide : 0) };
+  if (w.kind === "grenade") {
+    const d = Math.min(dist(player, target), st.range);
+    grenades.push({ sx: mz.x, sy: mz.y, tx: target.x, ty: target.y, x: mz.x, y: mz.y, t: 0, dur: clamp(d / 170, 0.35, 0.9), spin: 0,
+      blast: w.blast * st.blast, fire: !!w.fire, crit: Math.random() < st.crit });
+  } else {
+    for (let i = 0; i < (w.pellets || 1); i++) {
+      const a = ang + rnd(-w.spread, w.spread);
+      const spd = w.speed * (w.kind === "flame" ? rnd(0.75, 1.1) : 1);
+      const life = st.range / w.speed * (w.kind === "flame" ? 1.6 : 1.15);
+      // px/py: last hit-test point; starts at the hand so point-blank zombies get hit
+      bullets.push({ x: mz.x, y: mz.y, px: h2.x, py: h2.y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, ang: a, life, max: life,
+        kind: w.kind, crit: Math.random() < st.crit, pierce: w.pierce || 0, hit: [], blast: (w.blast || 0) * st.blast });
     }
   }
-  for (let i = 0; i < 12; i++) {
-    fx.push({ kind: "spark", x: m.tx, y: m.ty - 2, vx: rnd(-70, 70), vy: rnd(-90, -10), life: rnd(0.25, 0.6), max: 0.6 });
+  if (w.kind !== "flame") {
+    fx.push({ kind: "muzzle", x: mz.x, y: mz.y, ang, life: 0.06, max: 0.06 });
+    if (w.kind === "bullet") fx.push({ kind: "shell", x: h2.x, y: h2.y - 2, vx: -player.facing * rnd(20, 50), vy: rnd(-70, -40), life: 0.45, max: 0.45 });
   }
-}
-
-function playerStarAttack() {
-  const st = player.stats;
-  const target = nearestEnemy(player, st.range);
-  if (!target) return;
-  player.atkCd = 1 / st.atkSpd;
-  const ang = Math.atan2(target.y - player.y, target.x - player.x);
-  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-  player.atkAng = ang;
-  stars.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 260, vy: Math.sin(ang) * 260, spin: 0, life: 0.6 });
-  SFX.slash();
-}
-
-// blast dagger: auto-thrown spinning blade, arcane AoE burst where it lands
-function playerDaggerAttack() {
-  const st = player.stats;
-  const target = nearestEnemy(player, st.range);
-  if (!target) return;
-  player.atkCd = 1 / st.atkSpd;
-  const ang = Math.atan2(target.y - player.y, target.x - player.x);
-  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-  player.atkAng = ang;
-  daggers.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 230, vy: Math.sin(ang) * 230, spin: 0, life: 0.65 });
-  SFX.slash();
-}
-
-function explodeDagger(d) {
-  const st = player.stats;
-  beep(320, 0.14, "square", 0.07, -160);
-  for (const e of [...enemies]) {
-    if (e.warmup > 0) continue;
-    if (Math.hypot(e.x - d.x, e.y - d.y) < 30 + e.r) {
-      const crit = Math.random() < st.crit;
-      damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
-    }
-  }
-  for (let i = 0; i < 11; i++) {
-    fx.push({ kind: "spark", violet: true, x: d.x, y: d.y - 2, vx: rnd(-70, 70), vy: rnd(-80, -10), life: rnd(0.2, 0.5), max: 0.5 });
-  }
-  fx.push({ kind: "ring", x: d.x, y: d.y, life: 0.28, max: 0.28, r: 30, violet: true });
-}
-
-// the mage's normal attack: a small auto-fired magic missile, always ready
-function playerMissileAttack() {
-  const st = player.stats;
-  const target = nearestEnemy(player, 140);
-  if (!target) return;
-  player.atkCd = 1 / (1.7 * st.atkSpd);
-  const ang = Math.atan2(target.y - player.y, target.x - player.x);
-  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-  player.atkAng = ang;
-  missiles.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 240, vy: Math.sin(ang) * 240, life: 0.7, t: rnd(0, 9) });
-  beep(700, 0.05, "sine", 0.04, 200);
-}
-
-// mage spells — manual cast (click/tap or 1/2/3), auto-aimed, long cooldowns
-function castSpell(id) {
-  if (!player || player.spellCd[id] > 0) return false;
-  const st = player.stats;
-  if (id === "fire") {
-    const target = nearestEnemy(player, st.range);
-    if (!target) return false;
-    const ang = Math.atan2(target.y - player.y, target.x - player.x);
-    player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-    player.atkAng = ang;
-    fireballs.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 180, vy: Math.sin(ang) * 180, t: 0, life: 1.1 });
-    SFX.slash();
-  } else if (id === "shock") {
-    if (!enemies.some(e => e.warmup <= 0 && dist(e, player) < 70)) return false;
-    fx.push({ kind: "ring", x: player.x, y: player.y, life: 0.4, max: 0.4, r: 62 });
-    G.shake = Math.max(G.shake, 5);
-    SFX.boom();
-    for (const e of [...enemies]) {
-      if (e.warmup > 0) continue;
-      const d = dist(e, player);
-      if (d < 62 + e.r) {
-        const a = Math.atan2(e.y - player.y, e.x - player.x);
-        e.x += Math.cos(a) * 34 * st.knock; e.y += Math.sin(a) * 34 * st.knock;
-        damageEnemy(e, st.dmg * 0.8 * rnd(0.9, 1.1), false);
-      }
-    }
-  } else if (id === "beam") {
-    const target = nearestEnemy(player, st.range + 30);
-    if (!target) return false;
-    const ang = Math.atan2(target.y - player.y, target.x - player.x);
-    player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-    player.atkAng = ang;
-    beams.push({ ang, t: 1.3, tick: 0, len: 150 });
-    SFX.bossRoar();
-  }
-  player.spellCd[id] = SPELLS[id].cd;
-  return true;
-}
-
-function castNextReady() {
-  for (const id of ["fire", "shock", "beam"]) {
-    if (player.spellCd[id] <= 0 && castSpell(id)) return true;
-  }
-  return false;
-}
-
-function explodeFireball(f) {
-  const st = player.stats;
-  SFX.boom();
-  G.shake = Math.max(G.shake, 3);
-  for (const e of [...enemies]) {
-    if (e.warmup > 0) continue;
-    if (Math.hypot(e.x - f.x, e.y - f.y) < 28 + e.r) {
-      const crit = Math.random() < st.crit;
-      damageEnemy(e, st.dmg * 1.1 * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
-    }
-  }
-  for (let i = 0; i < 10; i++) {
-    fx.push({ kind: "spark", x: f.x, y: f.y - 2, vx: rnd(-60, 60), vy: rnd(-80, -10), life: rnd(0.2, 0.5), max: 0.5 });
-  }
-}
-
-function playerBowAttack() {
-  const st = player.stats;
-  const target = nearestEnemy(player, st.range);
-  if (!target) return;
-  player.atkCd = 1 / st.atkSpd;
-  const ang = Math.atan2(target.y - player.y, target.x - player.x);
-  player.facing = Math.cos(ang) >= 0 ? 1 : -1;
-  arrows.push({ x: player.x + Math.cos(ang) * 8, y: player.y - 8 + Math.sin(ang) * 8, vx: Math.cos(ang) * 300, vy: Math.sin(ang) * 300, ang, life: 0.8 });
-  SFX.slash();
+  gunSfx(w.snd);
   player.ammo--;
   if (player.ammo <= 0) {
-    player.reloadT = WEAPONS[G.weapon].reload;
+    player.reloadT = w.reload * st.reloadMul;
     texts.push({ x: player.x, y: player.y - 28, s: "reloading…", life: 1, col: "#ffd166" });
+  }
+}
+
+// rockets and grenade shells: area damage + knockback away from the blast
+function explode(x, y, r, dmg, crit) {
+  const st = player.stats;
+  SFX.boom();
+  G.shake = Math.max(G.shake, 5);
+  for (const e of [...enemies]) {
+    if (e.warmup > 0) continue;
+    if (Math.hypot(e.x - x, e.y - y) < r + e.r) {
+      damageEnemy(e, dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
+      if (enemies.includes(e) && !e.bossBar) {
+        const a = Math.atan2(e.y - y, e.x - x);
+        e.x += Math.cos(a) * 8 * st.knock; e.y += Math.sin(a) * 8 * st.knock;
+      }
+    }
+  }
+  fx.push({ kind: "ring", x, y, life: 0.3, max: 0.3, r });
+  fx.push({ kind: "flash", x, y, life: 0.18, max: 0.18, r });
+  for (let i = 0; i < 14; i++) {
+    fx.push({ kind: "spark", x, y: y - 2, vx: rnd(-80, 80), vy: rnd(-100, -10), life: rnd(0.25, 0.6), max: 0.6 });
+  }
+}
+
+const inRock = (x, y) => solids.some(s => x > s.x && x < s.x + s.w && y > s.y && y < s.y + s.h);
+// distance from point p to segment a->b: fast bullets travel 10-30px per
+// frame, so hits are tested along the whole step, not just its end
+function segDist(ax, ay, bx, by, px, py) {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
+  const t = clamp(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1);
+  return Math.hypot(ax + dx * t - px, ay + dy * t - py);
+}
+
+function updateShots(dt) {
+  const st = player.stats;
+  for (const b of [...bullets]) {
+    const ox = b.px, oy = b.py;
+    b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+    b.px = b.x; b.py = b.y;
+    if (b.kind === "flame") { b.vx *= 1 - 2.4 * dt; b.vy *= 1 - 2.4 * dt; }
+    if (b.kind === "rocket" && Math.random() < dt * 40) fx.push({ kind: "smoke", x: b.x, y: b.y, life: 0.4, max: 0.4 });
+    let dead = b.life <= 0 || inRock(b.x, b.y + 8);
+    for (const e of [...enemies]) {
+      if (dead) break;
+      if (e.warmup > 0 || b.hit.includes(e)) continue;
+      if (segDist(ox, oy, b.x, b.y, e.x, e.y - 4) >= e.r + (b.kind === "flame" ? 6 : 3)) continue;
+      if (b.kind === "rocket") { dead = true; break; }
+      damageEnemy(e, st.dmg * (b.crit ? 2 : 1) * rnd(0.9, 1.1), b.crit);
+      if (enemies.includes(e) && !e.bossBar) {
+        const kb = (b.kind === "flame" ? 0.4 : 2.5) * st.knock;
+        e.x += Math.cos(b.ang) * kb; e.y += Math.sin(b.ang) * kb;
+      }
+      b.hit.push(e);
+      if (b.pierce-- <= 0) dead = true;
+    }
+    if (dead) {
+      bullets.splice(bullets.indexOf(b), 1);
+      if (b.kind === "rocket") explode(b.x, b.y, b.blast, st.dmg, b.crit);
+    }
+  }
+  for (const g of [...grenades]) {
+    g.t += dt; g.spin += dt * 9;
+    const p = g.t / g.dur;
+    if (p >= 1) {
+      grenades.splice(grenades.indexOf(g), 1);
+      explode(g.tx, g.ty, g.blast, st.dmg, g.crit);
+      if (g.fire) firePatches.push({ x: g.tx, y: g.ty, life: 2.4, max: 2.4, tick: 0, seed: Math.random() * 9 });
+      continue;
+    }
+    g.x = g.sx + (g.tx - g.sx) * p;
+    g.y = g.sy + (g.ty - g.sy) * p - Math.sin(Math.PI * p) * 26;
   }
 }
 
@@ -1161,7 +1080,10 @@ function updatePlay(dt) {
   }
   const ml = Math.hypot(mx, my);
   player.moving = ml > 0;
-  if (ml > 0) { mx /= ml; my /= ml; player.facing = mx !== 0 ? Math.sign(mx) : player.facing; }
+  if (ml > 0) {
+    mx /= ml; my /= ml;
+    if (mx !== 0 && !aiming()) player.facing = Math.sign(mx); // while shooting, backpedal facing the target
+  }
 
   player.dashCd = Math.max(0, player.dashCd - dt);
   if ((keys.Space || keys.ShiftLeft) && ml > 0) tryDash(mx, my);
@@ -1175,86 +1097,18 @@ function updatePlay(dt) {
   player.hurtCd = Math.max(0, player.hurtCd - dt);
   player.hp = Math.min(st.maxHp, player.hp + st.regen * dt);
 
-  // -- attacks
+  // -- shooting
   player.atkCd -= dt;
-  if (WEAPONS[G.weapon].ranged) {
-    if (player.reloadT > 0) {
-      player.reloadT -= dt;
-      if (player.reloadT <= 0) { player.ammo = WEAPONS[G.weapon].clip; SFX.card(); }
-    } else if (player.atkCd <= 0) {
-      playerBowAttack();
-    }
-  } else if (WEAPONS[G.weapon].thrown) {
-    if (player.atkCd <= 0) playerMolotovAttack();
-  } else if (WEAPONS[G.weapon].star) {
-    if (player.atkCd <= 0) playerStarAttack();
-  } else if (WEAPONS[G.weapon].spells) {
-    for (const id of Object.keys(player.spellCd)) player.spellCd[id] = Math.max(0, player.spellCd[id] - dt);
-    if (player.atkCd <= 0) playerMissileAttack();
-  } else if (WEAPONS[G.weapon].blast) {
-    if (player.atkCd <= 0) playerDaggerAttack();
-  } else if (player.atkCd <= 0) playerMeleeAttack();
+  player.recoil = Math.max(0, player.recoil - dt * 30);
+  if (player.reloadT > 0) {
+    player.reloadT -= dt;
+    if (player.reloadT <= 0) { player.ammo = clipSize(); SFX.reload(); }
+  } else if (player.atkCd <= 0) {
+    fireGun();
+  }
+  updateShots(dt);
 
-  for (const d of [...daggers]) {
-    d.x += d.vx * dt; d.y += d.vy * dt; d.spin += dt * 18; d.life -= dt;
-    let boom = d.life <= 0;
-    for (const e of enemies) {
-      if (e.warmup > 0) continue;
-      if (dist(d, { x: e.x, y: e.y - 4 }) < e.r + 5) { boom = true; break; }
-    }
-    if (boom) { daggers.splice(daggers.indexOf(d), 1); explodeDagger(d); }
-  }
-
-  for (const m of [...missiles]) {
-    m.x += m.vx * dt; m.y += m.vy * dt; m.life -= dt; m.t += dt;
-    for (const e of enemies) {
-      if (e.warmup > 0) continue;
-      if (dist(m, { x: e.x, y: e.y - 4 }) < e.r + 4) {
-        const crit = Math.random() < st.crit;
-        damageEnemy(e, st.dmg * 0.9 * (crit ? 2 : 1) * rnd(0.9, 1.1), crit); // 9 dmg at base
-        m.life = 0;
-        break;
-      }
-    }
-    if (m.life <= 0) missiles.splice(missiles.indexOf(m), 1);
-  }
-
-  // -- mage projectiles & beams
-  for (const f of [...fireballs]) {
-    f.x += f.vx * dt; f.y += f.vy * dt; f.t += dt; f.life -= dt;
-    let hit = f.life <= 0;
-    for (const e of enemies) {
-      if (e.warmup > 0) continue;
-      if (dist(f, { x: e.x, y: e.y - 4 }) < e.r + 6) { hit = true; break; }
-    }
-    if (hit) { fireballs.splice(fireballs.indexOf(f), 1); explodeFireball(f); }
-  }
-  for (const b of [...beams]) {
-    b.t -= dt; b.tick -= dt;
-    if (b.t <= 0) { beams.splice(beams.indexOf(b), 1); continue; }
-    if (b.tick <= 0) {
-      b.tick = 0.3;
-      const ox = player.x, oy = player.y - 6;
-      for (const e of [...enemies]) {
-        if (e.warmup > 0) continue;
-        const dx = e.x - ox, dy = (e.y - 6) - oy;
-        const proj = dx * Math.cos(b.ang) + dy * Math.sin(b.ang);
-        const perp = Math.abs(-dx * Math.sin(b.ang) + dy * Math.cos(b.ang));
-        if (proj > 4 && proj < b.len && perp < 10 + e.r) {
-          damageEnemy(e, player.stats.dmg * 0.45 * rnd(0.9, 1.1), false);
-        }
-      }
-    }
-  }
-
-  // -- molotovs & burning ground
-  for (const m of [...molotovs]) {
-    m.t += dt; m.spin += dt * 9;
-    const p = m.t / m.dur;
-    if (p >= 1) { molotovs.splice(molotovs.indexOf(m), 1); explodeMolotov(m); continue; }
-    m.x = m.sx + (m.tx - m.sx) * p;
-    m.y = m.sy + (m.ty - m.sy) * p - Math.sin(Math.PI * p) * 26;
-  }
+  // -- burning ground
   for (const f of [...firePatches]) {
     f.life -= dt; f.tick -= dt;
     if (f.life <= 0) { firePatches.splice(firePatches.indexOf(f), 1); continue; }
@@ -1292,7 +1146,7 @@ function updatePlay(dt) {
     }
     let tx = player.x - e.x, ty = player.y - e.y;
     if (e.ranged) {
-      // shamans hover at range and lob bolts
+      // spitters hover at range and lob acid
       e.strafe += dt * 0.7;
       const want = 110;
       if (dToP < want - 15) { tx = -tx; ty = -ty; }
@@ -1301,7 +1155,7 @@ function updatePlay(dt) {
       if (e.atkCd <= 0 && dToP < (e.king ? 230 : 190)) {
         e.atkCd = e.king ? 3.6 : rnd(2.2, 3.2);
         const a = Math.atan2(player.y - e.y, player.x - e.x);
-        const n = e.king ? 5 : 1; // shaman king fires a fan
+        const n = e.king ? 5 : 1; // the bile king spits a fan
         for (let i = 0; i < n; i++) {
           const off = (i - (n - 1) / 2) * 0.26;
           bolts.push({ x: e.x, y: e.y - 8, vx: Math.cos(a + off) * 95, vy: Math.sin(a + off) * 95, t: 0, dmg: e.dmg });
@@ -1312,12 +1166,12 @@ function updatePlay(dt) {
       e.summonCd -= dt;
       if (e.summonCd <= 0) {
         e.summonCd = 7;
-        texts.push({ x: e.x, y: e.y - 40, s: "WAAAGH!", life: 1.2, col: "#ff6b6b", big: true });
+        texts.push({ x: e.x, y: e.y - 40, s: "BRAAAINS!", life: 1.2, col: "#ff6b6b", big: true });
         SFX.bossRoar();
-        for (let i = 0; i < 3; i++) spawnEnemy("goblin", { x: e.x + rnd(-34, 34), y: e.y + rnd(-26, 26) });
+        for (let i = 0; i < 3; i++) spawnEnemy("crawler", { x: e.x + rnd(-34, 34), y: e.y + rnd(-26, 26) });
       }
     }
-    if (e.god) { // grommok: ground slams + savages, enrages when wounded
+    if (e.god) { // morgrax: ground slams + ferals, enrages when wounded
       const enragedGod = e.hp < e.maxHp * 0.4;
       if (enragedGod) sp *= 1.6;
       e.slamCd -= dt;
@@ -1331,17 +1185,17 @@ function updatePlay(dt) {
       e.summonCd -= dt;
       if (e.summonCd <= 0) {
         e.summonCd = 8;
-        texts.push({ x: e.x, y: e.y - 40, s: "KNEEL!", life: 1.2, col: "#ffb347", big: true });
-        for (let i = 0; i < 2; i++) spawnEnemy("orc_savage", { x: e.x + rnd(-36, 36), y: e.y + rnd(-28, 28) });
+        texts.push({ x: e.x, y: e.y - 40, s: "ROT WITH ME!", life: 1.2, col: "#ffb347", big: true });
+        for (let i = 0; i < 2; i++) spawnEnemy("feral", { x: e.x + rnd(-36, 36), y: e.y + rnd(-28, 28) });
       }
     }
-    if (e.souls) { // the soulcaller raises ghost orcs around himself
+    if (e.souls) { // the necromancer raises wraiths around himself
       e.summonCd -= dt;
       if (e.summonCd <= 0) {
         e.summonCd = 6;
         texts.push({ x: e.x, y: e.y - 40, s: "RISE, MY FALLEN!", life: 1.4, col: "#78ffdc", big: true });
         beep(180, 0.5, "sine", 0.09, 240);
-        for (let i = 0; i < 4; i++) spawnEnemy("ghost_orc", { x: e.x + rnd(-38, 38), y: e.y + rnd(-30, 30) });
+        for (let i = 0; i < 4; i++) spawnEnemy("wraith", { x: e.x + rnd(-38, 38), y: e.y + rnd(-30, 30) });
       }
     }
     const tl = Math.hypot(tx, ty) || 1;
@@ -1384,33 +1238,7 @@ function updatePlay(dt) {
     }
   }
 
-  // -- projectiles
-  for (const s2 of [...stars]) {
-    s2.x += s2.vx * dt; s2.y += s2.vy * dt; s2.spin += dt * 22; s2.life -= dt;
-    for (const e of enemies) {
-      if (e.warmup > 0) continue;
-      if (dist(s2, { x: e.x, y: e.y - 4 }) < e.r + 4) {
-        const crit = Math.random() < st.crit;
-        damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
-        s2.life = 0;
-        break;
-      }
-    }
-    if (s2.life <= 0) stars.splice(stars.indexOf(s2), 1);
-  }
-  for (const a of [...arrows]) {
-    a.x += a.vx * dt; a.y += a.vy * dt; a.life -= dt;
-    for (const e of enemies) {
-      if (e.warmup > 0) continue;
-      if (dist(a, { x: e.x, y: e.y - 4 }) < e.r + 5) {
-        const crit = Math.random() < st.crit;
-        damageEnemy(e, st.dmg * (crit ? 2 : 1) * rnd(0.9, 1.1), crit);
-        a.life = 0;
-        break;
-      }
-    }
-    if (a.life <= 0) arrows.splice(arrows.indexOf(a), 1);
-  }
+  // -- enemy projectiles
   for (const b of [...bolts]) {
     b.x += b.vx * dt; b.y += b.vy * dt; b.t += dt;
     if (b.t > 2.4) { bolts.splice(bolts.indexOf(b), 1); continue; }
@@ -1457,7 +1285,7 @@ function updatePlay(dt) {
     if (dist(f, player) < 10) {
       flasks.splice(flasks.indexOf(f), 1);
       player.hp = Math.min(st.maxHp, player.hp + st.maxHp * 0.3);
-      texts.push({ x: player.x, y: player.y - 26, s: "+" + Math.round(st.maxHp * 0.3), life: 1, col: "#ff6b6b" });
+      texts.push({ x: player.x, y: player.y - 26, s: "+" + big(st.maxHp * 0.3), life: 1, col: "#ff6b6b" });
       SFX.gem();
     }
   }
@@ -1470,7 +1298,7 @@ function updatePlay(dt) {
     if (!G.kingSeen && dist(player, kingPos) < 70) {
       G.kingSeen = true;
       beep(110, 0.5, "sine", 0.06, -40);
-      say("No… my King… I came too late.");
+      say("No… my King… they got to him.");
       say("…then this cave becomes their grave.", 3.4);
     }
   }
@@ -1484,7 +1312,8 @@ function updatePlay(dt) {
   // -- fx / texts
   for (const p of [...fx]) {
     p.life -= dt;
-    if (p.kind === "blood" || p.kind === "spark") { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; }
+    if (p.kind === "blood" || p.kind === "spark" || p.kind === "shell") { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 260 * dt; }
+    if (p.kind === "smoke") p.y -= 12 * dt;
     if (p.kind === "drip") p.y += 55 * dt;
     if (p.life <= 0) fx.splice(fx.indexOf(p), 1);
   }
@@ -1499,12 +1328,12 @@ function updatePlay(dt) {
 
   // -- wave end
   if (!spawnQueue.length && enemies.length === 0) {
-    if (G.wave === 20 && !UN.slave) { // beating the Orc God frees his prisoner
-      UN.slave = true; saveUnlocks();
+    if (G.wave === 20 && !UN.commando) { // beating the Rot God frees his prisoner
+      UN.commando = true; saveUnlocks();
       texts.push({ x: player.x, y: player.y - 52, s: "A CAGE BREAKS IN THE DEEP…", life: 3.5, col: "#b48cff", big: true });
-      texts.push({ x: player.x, y: player.y - 40, s: "SECRET HERO UNLOCKED: THE SLAVE", life: 3.5, col: "#ffd166", big: true });
+      texts.push({ x: player.x, y: player.y - 40, s: "SECRET HERO UNLOCKED: THE COMMANDO", life: 3.5, col: "#ffd166", big: true });
       SFX.level();
-      say("The King's servant… alive! Go — you are free.", 1.5);
+      say("A survivor… and armed to the teeth!", 1.5);
     }
     if (G.wave === FINAL_WAVE && !G.endless) {
       // victory is triggered on boss kill; safety net:
@@ -1533,7 +1362,7 @@ function hurtPlayer(dmg) {
   player.flash = 0.15;
   G.shake = 6;
   SFX.hurt();
-  texts.push({ x: player.x, y: player.y - 26, s: "-" + Math.round(taken), life: 0.8, col: "#ff6b6b" });
+  texts.push({ x: player.x, y: player.y - 26, s: "-" + big(taken), life: 0.8, col: "#ff6b6b" });
   if (player.hp <= 0) {
     G.state = "gameover";
     bankCoins();
@@ -1611,64 +1440,34 @@ function renderWorld() {
   for (const d of drawables) d.draw();
 
   // projectiles & fx above
-  for (const m of molotovs) {
-    ctx.save(); ctx.translate(Math.round(m.x), Math.round(m.y)); ctx.rotate(m.spin);
-    const im = IMG.weapon_molotov;
+  for (const p of fx) if (p.kind === "smoke") {
+    ctx.fillStyle = `rgba(150,140,150,${0.35 * p.life / p.max})`;
+    const r = 2 + (1 - p.life / p.max) * 3;
+    ctx.fillRect(Math.round(p.x - r / 2), Math.round(p.y - r / 2), Math.round(r), Math.round(r));
+  }
+  for (const g of grenades) {
+    ctx.save(); ctx.translate(Math.round(g.x), Math.round(g.y)); ctx.rotate(g.spin);
+    const im = IMG.proj_grenade;
     ctx.drawImage(im, -im.width / 2, -im.height / 2);
     ctx.restore();
   }
-  for (const a of arrows) {
-    ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.ang + Math.PI / 2);
-    const im = IMG.weapon_arrow;
-    ctx.drawImage(im, -im.width / 2, -im.height / 2);
-    ctx.restore();
-  }
-  for (const s2 of stars) {
-    ctx.save(); ctx.translate(Math.round(s2.x), Math.round(s2.y)); ctx.rotate(s2.spin);
-    const im = IMG.weapon_shuriken;
-    ctx.drawImage(im, -im.width / 2, -im.height / 2);
-    ctx.restore();
-  }
-  for (const d of daggers) {
-    ctx.save(); ctx.translate(Math.round(d.x), Math.round(d.y)); ctx.rotate(d.spin);
-    const im = IMG.weapon_blast_dagger;
-    ctx.drawImage(im, -im.width / 2, -im.height / 2);
-    ctx.restore();
-  }
-  for (const m of missiles) {
-    const wob = Math.sin(m.t * 26) * 1.5;
-    const px2 = -m.vy, py2 = m.vx;
-    const pl = Math.hypot(px2, py2) || 1;
-    const mx = m.x + (px2 / pl) * wob, my = m.y + (py2 / pl) * wob;
-    ctx.fillStyle = "rgba(150,110,255,0.45)";
-    ctx.fillRect(Math.round(mx - m.vx * 0.02) - 1, Math.round(my - m.vy * 0.02) - 1, 2, 2);
-    ctx.fillStyle = "#b48cff";
-    ctx.fillRect(Math.round(mx) - 1, Math.round(my) - 1, 3, 3);
-    ctx.fillStyle = "#efe6ff";
-    ctx.fillRect(Math.round(mx), Math.round(my), 1, 1);
-  }
-  for (const f of fireballs) {
-    const g3 = ctx.createRadialGradient(f.x, f.y, 1, f.x, f.y, 10);
-    g3.addColorStop(0, "rgba(255,240,180,0.95)");
-    g3.addColorStop(0.5, "rgba(240,130,40,0.7)");
-    g3.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g3;
-    ctx.fillRect(f.x - 10, f.y - 10, 20, 20);
-    ctx.fillStyle = "#fff3c4";
-    ctx.fillRect(Math.round(f.x) - 2, Math.round(f.y) - 2, 4, 4);
-  }
-  for (const b of beams) {
-    const ox = player.x, oy = player.y - 6;
-    const flick = 0.7 + Math.sin(G.t * 40) * 0.3;
-    const fade = clamp(b.t / 0.3, 0, 1); // fades out at the end
-    ctx.save();
-    ctx.translate(ox, oy); ctx.rotate(b.ang);
-    ctx.lineCap = "round";
-    for (const [w2, col] of [[9, `rgba(200,50,20,${0.25 * fade})`], [5, `rgba(240,130,40,${0.55 * fade * flick})`], [2, `rgba(255,240,190,${0.9 * fade})`]]) {
-      ctx.strokeStyle = col; ctx.lineWidth = w2;
-      ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(b.len, 0); ctx.stroke();
+  for (const b of bullets) {
+    if (b.kind === "flame") {
+      const age = 1 - b.life / b.max, r = 2 + age * 7;
+      ctx.fillStyle = age < 0.3 ? "rgba(255,240,170,0.9)" : age < 0.65 ? `rgba(250,140,40,${0.85 - age * 0.4})` : `rgba(160,50,30,${0.6 * (1 - age)})`;
+      ctx.fillRect(Math.round(b.x - r / 2), Math.round(b.y - r / 2), Math.round(r), Math.round(r));
+    } else if (b.kind === "rocket") {
+      ctx.save(); ctx.translate(Math.round(b.x), Math.round(b.y)); ctx.rotate(b.ang);
+      ctx.fillStyle = Math.random() < 0.5 ? "#ffd166" : "#ff8a3d";
+      ctx.fillRect(-7, -1, 3, 2); // exhaust
+      const im = IMG.proj_rocket;
+      ctx.drawImage(im, -im.width / 2, -im.height / 2);
+      ctx.restore();
+    } else {
+      const tl = b.pierce > 2 ? 0.035 : 0.018; // snipers leave a longer tracer
+      ctx.strokeStyle = b.crit ? "#fff7d6" : "#ffd166"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(b.x - b.vx * tl, b.y - b.vy * tl); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
-    ctx.restore();
   }
   for (const b of bolts) drawSprite(animFrame(ANIM.bolt, b.t, 8), b.x, b.y + 3);
   for (const ring of bossRings) {
@@ -1683,54 +1482,35 @@ function renderWorld() {
   }
   for (const p of fx) {
     if (p.kind === "blood") {
-      ctx.fillStyle = `rgba(110,180,60,${p.life / p.max})`;
+      ctx.fillStyle = `rgba(120,34,30,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
     } else if (p.kind === "drip") {
       ctx.fillStyle = `rgba(200,40,45,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 2);
     } else if (p.kind === "ring") {
       const pr = (1 - p.life / p.max) * p.r;
-      ctx.strokeStyle = p.violet ? `rgba(180,140,255,${p.life / p.max})` : `rgba(255,209,102,${p.life / p.max})`; ctx.lineWidth = 2;
+      ctx.strokeStyle = `rgba(255,209,102,${p.life / p.max})`; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = `rgba(255,255,255,${0.5 * p.life / p.max})`; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(0, pr - 5), 0, Math.PI * 2); ctx.stroke();
+    } else if (p.kind === "flash") {
+      const g4 = ctx.createRadialGradient(p.x, p.y, 1, p.x, p.y, p.r);
+      g4.addColorStop(0, `rgba(255,240,190,${0.9 * p.life / p.max})`);
+      g4.addColorStop(0.5, `rgba(250,140,40,${0.6 * p.life / p.max})`);
+      g4.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g4;
+      ctx.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
     } else if (p.kind === "spark") {
-      ctx.fillStyle = p.violet
-        ? `rgba(${150 + Math.round(60 * p.life / p.max)},120,255,${p.life / p.max})`
-        : `rgba(252,${140 + Math.round(90 * p.life / p.max)},50,${p.life / p.max})`;
+      ctx.fillStyle = `rgba(252,${140 + Math.round(90 * p.life / p.max)},50,${p.life / p.max})`;
       ctx.fillRect(Math.round(p.x), Math.round(p.y), 2, 2);
-    } else if (p.kind === "slash") {
-      const f = ANIM.slash[Math.min(2, Math.floor((1 - p.life / p.max) * 3))];
+    } else if (p.kind === "shell") {
+      ctx.fillStyle = `rgba(230,190,80,${p.life / p.max})`;
+      ctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+    } else if (p.kind === "muzzle") {
       ctx.save();
-      ctx.translate(p.x, p.y + 6);
-      ctx.rotate(p.ang + Math.PI * 0.75);
-      if (p.scale && p.scale !== 1) ctx.scale(p.scale, p.scale);
-      ctx.globalAlpha = 0.9;
-      const im = IMG[f];
-      ctx.drawImage(im, -im.width / 2, -im.height / 2);
-      ctx.restore();
-    } else if (p.kind === "whip") {
-      // cracking lash: quadratic curve from hand to tip, extends then snaps back
-      const prog = 1 - p.life / p.max;
-      const st2 = player.stats;
-      const len = st2.range * 1.05 * Math.sin(Math.PI * Math.min(1, prog * 1.15));
-      const hx = player.x + Math.cos(p.ang) * 6, hy = player.y - 8 + Math.sin(p.ang) * 6;
-      const tx2 = hx + Math.cos(p.ang) * len, ty2 = hy + Math.sin(p.ang) * len;
-      const px2 = -Math.sin(p.ang), py2 = Math.cos(p.ang);
-      const wob = Math.sin(prog * Math.PI * 3) * 9 * (1 - prog);
-      ctx.save();
-      ctx.lineCap = "round";
-      for (const [w2, col] of [[2.5, `rgba(94,62,40,${0.8 * p.life / p.max + 0.2})`], [1, `rgba(224,190,140,${0.9})`]]) {
-        ctx.strokeStyle = col; ctx.lineWidth = w2;
-        ctx.beginPath();
-        ctx.moveTo(hx, hy);
-        ctx.quadraticCurveTo(hx + Math.cos(p.ang) * len * 0.5 + px2 * wob, hy + Math.sin(p.ang) * len * 0.5 + py2 * wob, tx2, ty2);
-        ctx.stroke();
-      }
-      if (prog > 0.35 && prog < 0.75) { // crack flash at the tip
-        ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.fillRect(Math.round(tx2) - 1, Math.round(ty2) - 1, 3, 3);
-      }
+      ctx.translate(Math.round(p.x), Math.round(p.y)); ctx.rotate(p.ang);
+      ctx.fillStyle = "#fff3c4"; ctx.fillRect(0, -1, 5, 3);
+      ctx.fillStyle = "#ffb347"; ctx.fillRect(4, -2, 2, 1); ctx.fillRect(4, 2, 2, 1); ctx.fillRect(5, 0, 2, 1);
       ctx.restore();
     }
   }
@@ -1752,51 +1532,27 @@ function renderWorld() {
 
 const PLAYER_SCALE = 1.3;
 function drawPlayer() {
-  const st = player.stats;
   const list = ANIM[CLASSES[G.cls].anim + (player.moving ? "_run" : "_idle")];
   if (player.flash > 0) { player.flash -= 1 / 60; ctx.filter = "brightness(2.5)"; }
   if (player.hurtCd > 0.3) ctx.globalAlpha = 0.6;
   drawSprite(animFrame(list, player.animT), player.x, player.y + 5, player.facing < 0, PLAYER_SCALE);
   ctx.filter = "none"; ctx.globalAlpha = 1;
-  // held weapon(s)
-  const wdef = WEAPONS[G.weapon];
-  const im = IMG[wdef.sprite];
-  const tSince = 1 / st.atkSpd - player.atkCd;
-  const attacking = player.atkCd > 0 && tSince >= 0 && tSince < 0.22;
-  if (G.weapon === "spear" && attacking) {
-    // thrust: the spear itself shoots out along the attack angle and returns
-    const prog = Math.sin(Math.PI * tSince / 0.22);
-    const d = 4 + prog * st.range * 0.6;
-    ctx.save();
-    ctx.translate(Math.round(player.x + Math.cos(player.atkAng) * d), Math.round(player.y - 6 + Math.sin(player.atkAng) * d));
-    ctx.rotate(player.atkAng + Math.PI / 2);
-    ctx.drawImage(im, -im.width / 2, -im.height + 2); // grip at origin, tip leads
-    ctx.restore();
-  } else if (G.weapon === "whip" && attacking) {
-    // handle flicks toward the lash (the lash itself is a whip fx)
-    ctx.save();
-    ctx.translate(Math.round(player.x + Math.cos(player.atkAng) * 6), Math.round(player.y - 8));
-    ctx.rotate(player.atkAng + Math.PI / 2 + 0.4);
-    ctx.drawImage(im, -im.width / 2, -im.height + 3);
-    ctx.restore();
-  } else if (!wdef.brawl) { // bare hands hold nothing
-    const throwerPose = wdef.ranged || wdef.thrown || wdef.star || wdef.spells || wdef.blast;
-    const swing = (throwerPose || G.weapon === "spear" || G.weapon === "whip") ? 0 : (attacking ? -1.2 : 0);
-    ctx.save();
-    ctx.translate(Math.round(player.x + player.facing * 8), Math.round(player.y - 8));
-    ctx.rotate(player.facing * (throwerPose ? 0.15 : 0.5 + swing));
-    ctx.scale(player.facing, 1);
-    ctx.drawImage(im, -2, -im.height + 4);
-    ctx.restore();
-    if (G.weapon === "knives") { // off-hand knife
-      ctx.save();
-      ctx.translate(Math.round(player.x - player.facing * 7), Math.round(player.y - 7));
-      ctx.rotate(-player.facing * (0.4 + swing * 0.5));
-      ctx.scale(-player.facing, 1);
-      ctx.drawImage(im, -2, -im.height + 4);
-      ctx.restore();
-    }
-  }
+  // held gun(s): pointed at the target while shooting, lowered otherwise
+  const w = WEAPONS[G.weapon], im = IMG[w.sprite];
+  const ang = aiming() ? player.atkAng : (player.facing > 0 ? 0.35 : Math.PI - 0.35);
+  const h = handPos();
+  const backKick = w.akimbo && player.akimboSide < 0; // akimbo: the guns take turns
+  if (w.akimbo) drawGun(im, h.x - player.facing * 4, h.y + 1, ang, backKick ? player.recoil : 0);
+  drawGun(im, h.x, h.y, ang, backKick ? 0 : player.recoil);
+}
+
+function drawGun(im, x, y, ang, kick) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.rotate(ang);
+  if (Math.cos(ang) < 0) ctx.scale(1, -1); // keep it upright when aiming left
+  ctx.drawImage(im, -2 - Math.round(kick), -im.height + 3); // grip at (2, h-3)
+  ctx.restore();
 }
 
 function drawEnemy(e) {
@@ -1846,19 +1602,16 @@ function renderDarkness(cx, cy) {
   punch(player.x, player.y, 135, 0.95);
   for (const b of bolts) punch(b.x, b.y, 22, 0.8);
   for (const f of firePatches) punch(f.x, f.y, 55, 0.85 * clamp(f.life / f.max + 0.3, 0, 1));
-  for (const m of molotovs) punch(m.x, m.y, 18, 0.7);
-  for (const f of fireballs) punch(f.x, f.y, 30, 0.8);
-  for (const m of missiles) punch(m.x, m.y, 14, 0.6);
-  for (const d of daggers) punch(d.x, d.y, 16, 0.6);
+  for (const b of bullets) punch(b.x, b.y, b.kind === "flame" ? 20 : b.kind === "rocket" ? 26 : 8, 0.6);
+  for (const g of grenades) punch(g.x, g.y, 12, 0.5);
+  for (const p of fx) {
+    if (p.kind === "muzzle") punch(p.x, p.y, 34, 0.7);
+    else if (p.kind === "flash") punch(p.x, p.y, p.r * 2, 0.9 * p.life / p.max);
+  }
   for (const ring of bossRings) punch(ring.x, ring.y, ring.r + 14, 0.5);
   for (const m of mushrooms) punch(m.x, m.y - 3, 22, 0.55);
   for (const t of torches) punch(t.x, t.y - 6, 46 + Math.sin(G.t * 9 + t.t) * 4, 0.8);
   if (kingPos) punch(kingPos.x, kingPos.y - 12, 36, 0.5);
-  for (const b of beams) {
-    for (let i = 0; i < 4; i++) {
-      punch(player.x + Math.cos(b.ang) * (20 + i * 38), player.y - 6 + Math.sin(b.ang) * (20 + i * 38), 26, 0.6);
-    }
-  }
   let n = 0;
   for (const e of enemies) { if (n++ > 50) break; punch(e.x, e.y, e.big ? 40 : 24, 0.45); }
   for (const g2 of gems) punch(g2.x, g2.y, 10, 0.5);
@@ -1878,7 +1631,7 @@ function renderHUD() {
   // hp
   bar(8, 8, 90, 8, player.hp / st.maxHp, "#e4485a");
   ctx.font = "bold 7px monospace"; ctx.textAlign = "left"; ctx.fillStyle = "#fff";
-  ctx.fillText(`${Math.ceil(player.hp)}/${st.maxHp}`, 12, 15);
+  ctx.fillText(`${Math.ceil(player.hp * NUM_MULT)}/${big(st.maxHp)}`, 12, 15);
   // xp
   bar(8, 19, 90, 5, player.xp / xpNeeded(player.level), "#7bd88f");
   ctx.fillStyle = "#cfc6de";
@@ -1887,22 +1640,27 @@ function renderHUD() {
   ctx.textAlign = "center"; ctx.font = "bold 10px monospace"; ctx.fillStyle = "#ffd166";
   ctx.fillText(`WAVE ${G.wave}`, VW / 2, 14);
   ctx.font = "7px monospace"; ctx.fillStyle = "#cfc6de";
-  ctx.fillText(`${enemies.length + spawnQueue.length} orcs left`, VW / 2, 23);
+  ctx.fillText(`${enemies.length + spawnQueue.length} zombies left`, VW / 2, 23);
   // kills
   const sk = IMG.skull;
   if (sk && sk.complete) ctx.drawImage(sk, VW - 26 - String(G.kills).length * 5, 5);
   ctx.textAlign = "right";
   ctx.fillStyle = "#ffd166"; ctx.fillText(`${G.kills}`, VW - 10, 14);
-  // bow ammo
-  if (WEAPONS[G.weapon].ranged) {
-    if (player.reloadT > 0) {
-      bar(8, 30, 60, 4, 1 - player.reloadT / WEAPONS[G.weapon].reload, "#ffd166");
-    } else {
-      for (let i = 0; i < WEAPONS[G.weapon].clip; i++) {
-        ctx.fillStyle = i < player.ammo ? "#ffd166" : "#3a3346";
-        ctx.fillRect(8 + i * 6, 30, 4, 4);
-      }
+  // ammo: one pip per round for small clips, a bar + count for belts
+  const clip = clipSize();
+  if (player.reloadT > 0) {
+    bar(8, 30, 60, 4, 1 - player.reloadT / (WEAPONS[G.weapon].reload * st.reloadMul), "#ffd166");
+    ctx.font = "6px monospace"; ctx.textAlign = "left"; ctx.fillStyle = "#ffd166";
+    ctx.fillText("RELOAD", 72, 35);
+  } else if (clip <= 20) {
+    for (let i = 0; i < clip; i++) {
+      ctx.fillStyle = i < player.ammo ? "#ffd166" : "#3a3346";
+      ctx.fillRect(8 + i * 4, 30, 2, 5);
     }
+  } else {
+    bar(8, 30, 60, 4, player.ammo / clip, "#ffd166");
+    ctx.font = "6px monospace"; ctx.textAlign = "left"; ctx.fillStyle = "#ffd166";
+    ctx.fillText(`${player.ammo}/${clip}`, 72, 35);
   }
   // pause button
   pauseBtnRect = { x: VW - 28, y: 30, w: 20, h: 18 };
@@ -1913,13 +1671,9 @@ function renderHUD() {
   ctx.fillRect(pauseBtnRect.x + 6, pauseBtnRect.y + 5, 3, 8);
   ctx.fillRect(pauseBtnRect.x + 11, pauseBtnRect.y + 5, 3, 8);
 
-  // monk weapon inventory (dev mode only)
-  if (DEV.on && G.cls === "monk") renderInventoryBar();
+  // armorer weapon inventory (dev mode only)
+  if (DEV.on && G.cls === "armorer") renderInventoryBar();
   else invRects = [];
-
-  // mage spell bar
-  if (WEAPONS[G.weapon].spells) renderSpellBar();
-  else spellRects = [];
 
   // touch dash button
   if (usingTouch) {
@@ -1944,9 +1698,9 @@ function renderHUD() {
 
 let pauseBtnRect = null, fsPauseRect = null, invRects = [];
 
-// monk-only (dev mode): switch to any weapon mid-run, stats rebuilt from
+// armorer-only (dev mode): switch to any gun mid-run, stats rebuilt from
 // scratch (base weapon -> class mods -> owned cards re-applied)
-function monkSwitchWeapon(id) {
+function armorerSwitchWeapon(id) {
   if (G.weapon === id) return;
   G.weapon = id;
   const stats = baseStats(id);
@@ -1957,65 +1711,14 @@ function monkSwitchWeapon(id) {
   const hpFrac = player.hp / player.stats.maxHp;
   player.stats = stats;
   player.hp = clamp(hpFrac * stats.maxHp, 1, stats.maxHp);
-  player.atkCd = 0; player.reloadT = 0; player.ammo = WEAPONS[id].clip || 0;
+  player.atkCd = 0; player.reloadT = 0; player.ammo = clipSize();
   SFX.card();
-}
-
-let spellRects = [];
-function renderSpellBar() {
-  spellRects = [];
-  const ids = Object.keys(SPELLS);
-  const slot = 26, gap = 6;
-  const total = ids.length * slot + (ids.length - 1) * gap;
-  // sits above the monk's arsenal bar when he's testing the spells
-  const x0 = VW / 2 - total / 2, y = (DEV.on && G.cls === "monk") ? VH - 62 : VH - 32;
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i], x = x0 + i * (slot + gap);
-    spellRects.push({ x, y, w: slot, h: slot, id });
-    const cd = player.spellCd[id], ready = cd <= 0;
-    ctx.fillStyle = ready ? "rgba(255,209,102,0.16)" : "rgba(24,19,34,0.85)";
-    ctx.fillRect(x, y, slot, slot);
-    ctx.strokeStyle = ready ? "#ffd166" : "#3a3346"; ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, slot - 1, slot - 1);
-    // icon
-    const cx2 = x + slot / 2, cy2 = y + slot / 2;
-    const col = ready ? "#ffb347" : "#57506b";
-    if (id === "fire") {
-      ctx.fillStyle = col;
-      ctx.beginPath(); ctx.arc(cx2, cy2 + 1, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = ready ? "#fff3c4" : "#6f6485";
-      ctx.beginPath(); ctx.arc(cx2 - 1, cy2, 2.5, 0, Math.PI * 2); ctx.fill();
-    } else if (id === "shock") {
-      ctx.strokeStyle = col; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(cx2, cy2, 7, 0, Math.PI * 2); ctx.stroke();
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(cx2, cy2, 3.5, 0, Math.PI * 2); ctx.stroke();
-    } else {
-      ctx.strokeStyle = col; ctx.lineCap = "round";
-      for (const [w2, len] of [[3, 8], [1.5, 10]]) {
-        ctx.lineWidth = w2;
-        ctx.beginPath(); ctx.moveTo(cx2 - len, cy2 + (w2 === 3 ? 0 : -4)); ctx.lineTo(cx2 + len, cy2 + (w2 === 3 ? 0 : -4)); ctx.stroke();
-      }
-    }
-    // cooldown veil
-    if (!ready) {
-      const frac = cd / SPELLS[id].cd;
-      ctx.fillStyle = "rgba(7,5,16,0.72)";
-      ctx.fillRect(x + 1, y + 1, slot - 2, Math.round((slot - 2) * frac));
-      ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#cfc6de";
-      ctx.fillText(Math.ceil(cd), cx2, cy2 + 3);
-    }
-    ctx.font = "6px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#6f6485";
-    ctx.fillText(`[${i + 1}]`, cx2, y + slot + 7);
-  }
-  ctx.font = "6px monospace"; ctx.fillStyle = "#8f84a8";
-  ctx.fillText("click / tap to cast — aim is automatic", VW / 2, y - 4);
 }
 
 function renderInventoryBar() {
   invRects = [];
   const ids = Object.keys(WEAPONS);
-  const slot = 21, gap = 1;
+  const slot = 22, gap = 2;
   const total = ids.length * slot + (ids.length - 1) * gap;
   const x0 = VW / 2 - total / 2, y = VH - 26;
   for (let i = 0; i < ids.length; i++) {
@@ -2028,12 +1731,12 @@ function renderInventoryBar() {
     ctx.strokeRect(x + 0.5, y + 0.5, slot - 1, slot - 1);
     const im = IMG[WEAPONS[id].sprite];
     if (im && im.complete) {
-      const s = Math.min(1.1, (slot - 6) / im.height, (slot - 6) / im.width);
+      const s = Math.min(1.5, (slot - 4) / im.height, (slot - 4) / im.width);
       ctx.drawImage(im, Math.round(x + slot / 2 - im.width * s / 2), Math.round(y + slot / 2 - im.height * s / 2), Math.round(im.width * s), Math.round(im.height * s));
     }
   }
   ctx.font = "6px monospace"; ctx.textAlign = "center"; ctx.fillStyle = "#8f84a8";
-  ctx.fillText(`MONK ARSENAL — ${WEAPONS[G.weapon].name} · tap a slot or Q/E to cycle`, VW / 2, y - 4);
+  ctx.fillText(`ARMORY — ${WEAPONS[G.weapon].name} · tap a slot or Q/E to cycle`, VW / 2, y - 4);
 }
 function renderPauseOverlay(t) {
   ctx.fillStyle = "rgba(7,5,16,0.7)"; ctx.fillRect(0, 0, VW, VH);
@@ -2271,9 +1974,9 @@ function renderCredits(t) {
   fadeTop.addColorStop(0, "rgba(7,5,16,0.95)"); fadeTop.addColorStop(1, "rgba(7,5,16,0)");
   ctx.fillStyle = fadeTop; ctx.fillRect(0, 0, VW, 26);
 
-  // the knight rests by the fire while the names roll
+  // the marine rests by the fire while the names roll
   drawSprite(animFrame(ANIM.campfire, t, 8), VW / 2 + 16, VH - 12, false, 1.5);
-  drawSprite(animFrame(ANIM.hero_idle, t, 6), VW / 2 - 18, VH - 14, false, PLAYER_SCALE);
+  drawSprite(animFrame(ANIM.marine_idle, t, 6), VW / 2 - 18, VH - 14, false, PLAYER_SCALE);
 }
 
 // key button + sound toggles + password modal --------------------------------
@@ -2378,8 +2081,8 @@ let clsRects = [], clsToast = null;
 
 function selectClass(id) {
   G.cls = id;
-  // the monk swaps weapons in-game via his inventory bar — no select screen
-  if (id === "monk") newRun("sword");
+  // the armorer swaps guns in-game via the armory bar — no select screen
+  if (id === "armorer") newRun("pistol");
   else G.state = "select";
 }
 
@@ -2417,9 +2120,8 @@ function tryBuyClass(id) {
 
 function unlockHint(id, c) {
   const buy = `buy ${c.price}g`;
-  if (id === "reaper") return buy + " · or reach wave 10";
-  if (id === "barbar" || id === "nun") return buy + " · or 0.1% boss relic";
-  if (id === "mage") return buy + " — the arcane is costly";
+  if (id === "ghost") return buy + " · or reach wave 10";
+  if (id === "demo" || id === "heavy") return buy + " · or 0.1% boss relic";
   return buy;
 }
 
@@ -2455,6 +2157,7 @@ function renderClassSelect(t) {
     ctx.drawImage(IMG.card, x, y, cw, chh);
     drawSprite(animFrame(ANIM[c.anim + "_idle"], t + i * 0.4, 6), x + cw / 2, y + 58, false, 1.3);
     ctx.font = "bold 8px monospace"; ctx.fillStyle = "#3a2c18";
+    if (ctx.measureText(c.name).width > cw - 6) ctx.font = "bold 6px monospace"; // "Demolitionist" on narrow cards
     ctx.fillText(c.name, x + cw / 2, y + 78);
     ctx.font = "6px monospace"; ctx.fillStyle = "#584426";
     wrapText(c.desc, x + cw / 2, y + 90, cw - 10, 8);
@@ -2512,7 +2215,7 @@ function renderSelect(t) {
 
   selectRects = []; upRects = [];
   const ids = CLASSES[G.cls].weapons;
-  const pw = 208, ph = 46, gapx = 16, gapy = 10;
+  const pw = 212, ph = 46, gapx = 16, gapy = 10;
   const cols = ids.length > 3 ? 2 : 1;
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i], w = WEAPONS[id];
@@ -2527,10 +2230,10 @@ function renderSelect(t) {
     ctx.strokeRect(x + 0.5, y + 0.5, pw - 1, ph - 1);
     const icon = IMG[w.sprite];
     if (icon && icon.complete) {
-      const s = Math.min(2, 36 / icon.height);
+      const s = Math.min(2, 36 / icon.height, 34 / icon.width);
       if (!unlocked) ctx.globalAlpha = 0.35;
       ctx.drawImage(icon, Math.round(x + 20 - icon.width * s / 2), Math.round(y + ph / 2 - icon.height * s / 2), Math.round(icon.width * s), Math.round(icon.height * s));
-      if (id === "knives") ctx.drawImage(icon, Math.round(x + 28 - icon.width * s / 2), Math.round(y + ph / 2 - icon.height * s / 2), Math.round(icon.width * s), Math.round(icon.height * s));
+      if (w.akimbo) ctx.drawImage(icon, Math.round(x + 24 - icon.width * s / 2), Math.round(y + ph / 2 + 4 - icon.height * s / 2), Math.round(icon.width * s), Math.round(icon.height * s));
       ctx.globalAlpha = 1;
     }
     const lv = wpnLevel(id);
@@ -2538,10 +2241,10 @@ function renderSelect(t) {
     ctx.font = "bold 8px monospace"; ctx.fillStyle = unlocked ? "#e8dfc8" : "#57506b";
     ctx.fillText(`[${i + 1}] ${w.name}${lv > 0 ? ` LV${lv}` : ""}`, x + 40, y + 14);
     ctx.font = "7px monospace"; ctx.fillStyle = unlocked ? "#8f84a8" : "#453f58";
-    ctx.fillText(unlocked ? w.desc : "locked — reach wave 10", x + 40, y + 26);
+    ctx.fillText(unlocked ? w.desc : "locked", x + 40, y + 26);
     ctx.fillStyle = unlocked ? "#ffd166" : "#453f58";
-    const dmgNow = Math.round(w.dmg * (1 + 0.08 * lv) * 10) / 10;
-    ctx.fillText(w.ranged ? `dmg ${dmgNow} · ${w.atkSpd}/s · ${w.clip} arrows` : `dmg ${dmgNow} · ${w.atkSpd}/s · reach ${w.range}`, x + 40, y + 38);
+    const dmgNow = big(w.dmg * (1 + 0.08 * lv));
+    ctx.fillText(`dmg ${dmgNow}${w.pellets ? "×" + w.pellets : ""}${w.blast ? " AoE" : ""} · ${w.atkSpd}/s · ${w.clip} rds`, x + 40, y + 38);
     // upgrade button (persistent, costs banked gold, price climbs per level)
     if (unlocked) {
       const ur = { x: x + pw - 44, y: y + 4, w: 40, h: ph - 8, id };
@@ -2607,13 +2310,13 @@ function renderTitle(t) {
   const pulse = 1 + Math.sin(t * 2) * 0.012;
   ctx.scale(pulse, pulse);
   ctx.textAlign = "center";
-  ctx.font = "bold 42px monospace";
-  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillText("ORC SLASHER", 3, 4);
+  ctx.font = "bold 36px monospace";
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillText("ZOMBIE BLASTER", 3, 4);
   const tg = ctx.createLinearGradient(0, -34, 0, 8);
   tg.addColorStop(0, "#fff3c4"); tg.addColorStop(0.45, "#ffd166"); tg.addColorStop(0.85, "#e2762e"); tg.addColorStop(1, "#a33d1e");
-  ctx.fillStyle = tg; ctx.fillText("ORC SLASHER", 0, 0);
+  ctx.fillStyle = tg; ctx.fillText("ZOMBIE BLASTER", 0, 0);
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(42,20,12,0.9)";
-  ctx.strokeText("ORC SLASHER", 0, 0);
+  ctx.strokeText("ZOMBIE BLASTER", 0, 0);
   ctx.restore();
   ctx.textAlign = "center";
 
@@ -2632,11 +2335,13 @@ function renderTitle(t) {
   }
   ctx.drawImage(titleFloor, 0, VH - 62);
 
-  // the knight rests at his campfire, facing the marching horde
+  // the marine holds the line at the campfire, facing the shambling horde
   drawSprite(animFrame(ANIM.campfire, t, 8), 46, VH - 40, false, 1.5);
-  drawSprite(animFrame(ANIM.hero_idle, t, 6), 78, VH - 42, false, PLAYER_SCALE);
+  drawSprite(animFrame(ANIM.marine_idle, t, 6), 78, VH - 42, false, PLAYER_SCALE);
+  const gim = IMG.gun_rifle;
+  if (imgOk(gim)) ctx.drawImage(gim, 79, VH - 55);
 
-  // endless orc horde marching left toward him
+  // endless zombie horde shambling left toward him
   const MARCH = [
     ["goblin_run", true, 1], ["orc_grunt_run", true, 1], ["orc_shaman_run", true, 1],
     ["cp_orc3_run_l", false, 1], ["orc_berserker_run", true, 1], ["cp_frost_run_l", false, 1],
@@ -2660,7 +2365,7 @@ function renderTitle(t) {
   ctx.font = "bold 11px monospace";
   const blink = (Math.sin(t * 4) + 1) / 2;
   ctx.fillStyle = `rgba(255,${209 + blink * 40},${102 + blink * 140},${0.6 + blink * 0.4})`;
-  ctx.fillText("PRESS ENTER / TAP TO SLAY", VW / 2, 138);
+  ctx.fillText("PRESS ENTER / TAP TO LOCK AND LOAD", VW / 2, 138);
   // credits link
   creditsRect = { x: 6, y: 6, w: 64, h: 16 };
   drawHeart(creditsRect.x + 4, creditsRect.y + 5, "#e4485a");
@@ -2675,17 +2380,17 @@ function renderEnd(victory, t) {
   ctx.textAlign = "center";
   ctx.font = "bold 26px monospace";
   ctx.fillStyle = victory ? "#7bd88f" : "#e4485a";
-  ctx.fillText(victory ? "WARCHIEF SLAIN!" : "YOU DIED", VW / 2, 90);
+  ctx.fillText(victory ? "PATIENT ZERO DOWN!" : "YOU DIED", VW / 2, 90);
   ctx.font = "9px monospace"; ctx.fillStyle = "#cfc6de";
-  ctx.fillText(`wave ${G.wave} · ${G.kills} orcs slain · ${G.coins} gold · level ${player ? player.level : 1}`, VW / 2, 112);
+  ctx.fillText(`wave ${G.wave} · ${G.kills} zombies slain · ${G.coins} gold · level ${player ? player.level : 1}`, VW / 2, 112);
   if (victory) {
     drawSprite(animFrame(ANIM[CLASSES[G.cls].anim + "_idle"], t, 6), VW / 2 - 12, 150);
     drawSprite(animFrame(ANIM.campfire, t, 8), VW / 2 + 12, 150);
     ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff";
     ctx.fillText("“It is done. Rest now, my King.”", VW / 2, 132);
     ctx.font = "8px monospace"; ctx.fillStyle = "#ffd166";
-    ctx.fillText("the cave is quiet. the fire is warm.", VW / 2, 168);
-    ctx.fillText("[E] keep slaying (endless)   [ENTER] new run", VW / 2, 196);
+    ctx.fillText("the cave is quiet. the barrels are hot.", VW / 2, 168);
+    ctx.fillText("[E] keep blasting (endless)   [ENTER] new run", VW / 2, 196);
   } else {
     drawSprite("skull", VW / 2, 152, false, 2);
     ctx.font = "italic 8px monospace"; ctx.fillStyle = "#a8d4ff";
@@ -2733,14 +2438,10 @@ function handleKey(code) {
   } else if (G.state === "play") {
     if (code === "KeyP" || code === "Escape") G.paused = !G.paused;
     if (code === "KeyF" && G.paused) toggleFullscreen();
-    if (DEV.on && G.cls === "monk" && (code === "KeyQ" || code === "KeyE")) {
+    if (DEV.on && G.cls === "armorer" && (code === "KeyQ" || code === "KeyE")) {
       const ids = Object.keys(WEAPONS);
       const i = ids.indexOf(G.weapon);
-      monkSwitchWeapon(ids[(i + (code === "KeyE" ? 1 : ids.length - 1)) % ids.length]);
-    }
-    if (WEAPONS[G.weapon].spells && !G.paused) {
-      const m = /^Digit([1-3])$/.exec(code);
-      if (m) castSpell(Object.keys(SPELLS)[+m[1] - 1]);
+      armorerSwitchWeapon(ids[(i + (code === "KeyE" ? 1 : ids.length - 1)) % ids.length]);
     }
   }
 }
@@ -2820,18 +2521,9 @@ function handleClick(x, y) {
     }
     for (const r of invRects) {
       if (x >= r.x && x <= r.x + r.w && y >= r.y - 2 && y <= r.y + r.h + 2) {
-        monkSwitchWeapon(r.id);
+        armorerSwitchWeapon(r.id);
         return true;
       }
-    }
-    if (WEAPONS[G.weapon].spells && !G.paused) {
-      for (const r of spellRects) {
-        if (x >= r.x - 3 && x <= r.x + r.w + 3 && y >= r.y - 3 && y <= r.y + r.h + 3) {
-          castSpell(r.id);
-          return true;
-        }
-      }
-      if (!lastPointerTouch) { castNextReady(); return true; } // mouse: click anywhere casts
     }
     if (G.paused) {
       if (fsPauseRect && x >= fsPauseRect.x && x <= fsPauseRect.x + fsPauseRect.w &&
@@ -2880,7 +2572,7 @@ function frame(now) {
   if (assetsLeft > 0) {
     ctx.fillStyle = "#0b0910"; ctx.fillRect(0, 0, VW, VH);
     ctx.fillStyle = "#cfc6de"; ctx.font = "10px monospace"; ctx.textAlign = "center";
-    ctx.fillText("sharpening axes…", VW / 2, VH / 2);
+    ctx.fillText("loading magazines…", VW / 2, VH / 2);
     requestAnimationFrame(frame);
     return;
   }
@@ -2907,12 +2599,12 @@ function frame(now) {
     else renderPassModal(dt);
   }
 
-  // dev mode badge (kept clear of the monk's arsenal bar)
+  // dev mode badge (kept clear of the armory bar)
   if (DEV.on) {
     ctx.font = "bold 7px monospace"; ctx.textAlign = "left";
     ctx.fillStyle = "#b48cff";
-    const inPlayAsMonk = G.state === "play" && G.cls === "monk";
-    ctx.fillText(inPlayAsMonk ? "DEV" : "DEV MODE — all classes & weapons (retype phrase on a menu to exit)", 6, inPlayAsMonk ? 44 : VH - 4);
+    const inPlayAsArmorer = G.state === "play" && G.cls === "armorer";
+    ctx.fillText(inPlayAsArmorer ? "DEV" : "DEV MODE — all classes & weapons (retype phrase on a menu to exit)", 6, inPlayAsArmorer ? 44 : VH - 4);
   }
 
   // touch joystick overlay
