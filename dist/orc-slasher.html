@@ -3554,9 +3554,17 @@ function sysBullets(dt) {
     if (kind === 2) { VX[e] *= 1 - 2.4 * dt; VY[e] *= 1 - 2.4 * dt; }
     if (kind === 1 && Math.random() < dt * 40) part(P_SMOKE, PX[e], PY[e], rnd(-5, 5), rnd(-8, 0), 0.5, PC_SMOKE, 0, 0, 2);
     let dead = LIFE[e] <= 0;
-    // the world: buildings stop rounds, props soak them up (and break)
+    // the world: buildings stop rounds, props soak them up (and break). The
+    // whole move is swept in 3px steps: a round covers 6px a frame at 60fps
+    // and ~19px at the dt cap, more than a lamp post (4px) or a wall tile
     if (!dead) {
-      const hit = solidAt(PX[e], PY[e] + 8);
+      const mx = PX[e] - ox, my = PY[e] - oy, steps = Math.max(1, Math.ceil(Math.hypot(mx, my) / 3));
+      let hit = 0;
+      for (let k = 1; k <= steps && !hit; k++) {
+        const hx = ox + mx * k / steps, hy = oy + my * k / steps;
+        hit = solidAt(hx, hy + 8);
+        if (hit && kind !== 2) { PX[e] = OX[e] = hx; PY[e] = OY[e] = hy; } // stop at the impact (flames flow on)
+      }
       if (hit === 1) dead = kind !== 2 || Math.random() < 0.3;
       else if (hit) {
         damageProp(hit.p, st.dmg * (kind === 2 ? 0.4 : 1) * (FLAG[e] ? 2 : 1), ROT[e]);
