@@ -2,6 +2,14 @@
 
 Player-facing docs live in README.md; this file is the technical map.
 
+## Performance — read first
+
+`docs/PERFORMANCE.md` holds the rules for the hot loop (no per-frame
+allocation, in-place array compaction, spatial hash, cached sprites, how
+to drive WebGL). Measure every perf change with `node tools/bench.mjs`
+(real rAF loop, not a synchronous sim) and put before/after numbers in the
+commit message.
+
 ## Repo layout
 
 ```
@@ -15,7 +23,8 @@ assets/custom/         original pixel art (make_custom_art.py; heroes/guns by ma
 assets/zombies/        GENERATED — zombified enemy frames, override same-named sprites
 assets/credits.json    source of truth for the in-game credits screen
 assets/CREDITS.md      license summary for humans
-docs/AUDIO.md          vetted libre audio shortlist (not yet integrated)
+docs/AUDIO.md          vetted libre audio shortlist
+docs/PERFORMANCE.md    perf rules for the game loop (with sources)
 tools/                 asset pipeline (see below)
 dist/orc-slasher.html  GENERATED — single-file build, committed
 ```
