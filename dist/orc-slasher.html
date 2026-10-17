@@ -2659,10 +2659,13 @@ function saveMeta() { try { localStorage.setItem("orcslasher_meta", JSON.stringi
 function recordBest() {
   if (G.score > (META.best || 0)) { META.best = G.score; saveMeta(); }
 }
+// deposits whatever the run earned since the last deposit, so calling it
+// again after late pickups (the WASTED slow-mo keeps the world running) is safe
 function bankCoins() {
-  if (G.bankedRun || !G.coins) return;
-  META.gold += Math.round(G.coins);
-  G.bankedRun = true;
+  const add = Math.round(G.coins) - G.banked;
+  if (add <= 0) return;
+  META.gold += add;
+  G.banked += add;
   saveMeta();
 }
 
@@ -2776,7 +2779,7 @@ function newRun(weaponId) {
   fxState.nextBolt = rnd(12, 30); shocks.length = 0;
   eReset(); banners.length = 0; activeProps.length = 0;
   spawnQueue = []; spawnTimer = 0;
-  G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.bankedRun = false; G.paused = false;
+  G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.banked = 0; G.paused = false;
   G.sayQ = []; G.kingSeen = false; G.saidLowHp = false;
   touch.id = -1; touch.goal = false; focus.z = focus.p = null;
   G.score = G.scoreShown = 0; G.combo = 0; G.comboT = 0; G.mult = 1; G.bestCombo = 0;
@@ -2981,9 +2984,10 @@ function drawThreeCards() {
   return opts;
 }
 
+const WAVE_BOUNTY = 25; // gold for every cleared wave
 function enterCampfire() {
   G.state = "campfire";
-  G.coins += 25; // wave bounty
+  G.coins += WAVE_BOUNTY;
   player.hp = Math.min(player.stats.maxHp, player.hp + Math.round((player.stats.maxHp - player.hp) * (0.4 + player.stats.wind)));
   campfire = {
     t: 0,
@@ -4009,7 +4013,7 @@ function updatePlay(rawDt) {
   if (G.slowMo > 0) { G.slowMo -= rawDt; rawDt *= 0.35; }
   if (G.wasted > 0) {
     G.wasted -= rawDt; rawDt *= 0.3;
-    if (G.wasted <= 0) { G.state = "gameover"; banners.length = 0; return; }
+    if (G.wasted <= 0) { G.state = "gameover"; banners.length = 0; bankCoins(); recordBest(); return; }
   }
   if (INTRO.kind) updateIntro(rawDt);
   updateHints(rawDt);
@@ -4445,7 +4449,7 @@ function propKind(img) {
   if (!img) return ["gallows", Infinity];
   if (img.startsWith("city_car_")) return img.endsWith("burnt") ? ["wreck", Infinity] : ["car", 70];
   if (img === "city_barrel") return ["barrel", 14];
-  if (img === "city_barrel_blue") return ["can", 12];
+  if (img === "city_barrel_blue") return ["barrel", 14];
   if (img === "city_firebarrel") return ["firebarrel", 12];
   if (img === "city_lamp") return ["lamp", 14];
   if (img === "city_lamp_broken") return ["lampdead", 18];
@@ -6643,7 +6647,7 @@ function handleKey(code) {
   } else if (G.state === "gameover" && code === "Enter") { cardCounts = {}; G.state = "cls"; }
   else if (G.state === "victory") {
     if (code === "KeyE") { G.endless = true; G.state = "play"; enterCampfire(); }
-    if (code === "Enter") { bankCoins(); cardCounts = {}; G.state = "cls"; }
+    if (code === "Enter") { G.coins += WAVE_BOUNTY; bankCoins(); cardCounts = {}; G.state = "cls"; } // no campfire on this path: pay wave 10 here
   } else if (G.state === "play") {
     if (code === "KeyP" || code === "Escape") G.paused = !G.paused;
     if (code === "KeyF" && G.paused) toggleFullscreen();
