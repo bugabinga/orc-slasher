@@ -1726,7 +1726,7 @@ let usingTouch = COARSE;
 const touch = { id: -1, x: 0, y: 0, sx: 0, sy: 0, t0: 0, far: 0, goal: false, gx: 0, gy: 0, goalT: 0 };
 const TAP_MS = 230, TAP_PX = 9, FLICK_PX = 20;
 // what the auto-aim prefers while it lives and is in range: a zombie or a prop
-const focus = { z: null, e: -1, p: null, lostT: 0 };
+const focus = { z: null, e: -1, p: null, ps: 0, lostT: 0 };
 const tapPad = () => (usingTouch ? 9 : 3);
 function canvasPos(t) {
   const r = canvas.getBoundingClientRect();
@@ -1761,7 +1761,7 @@ function focusAt(wx, wy) {
     }
   }
   if (!best) return false;
-  focus.z = null; focus.e = -1; focus.p = best; focus.lostT = 0;
+  focus.z = null; focus.e = -1; focus.p = best; focus.ps = best.state; focus.lostT = 0;
   return true;
 }
 function touchDash(dx, dy) {
@@ -3424,7 +3424,8 @@ function focusTarget(range) {
     x = focus.z.x; y = focus.z.y;
   } else if (focus.p) {
     const pr = focus.p;
-    if (pr.gone || pr.state === PS_WRECK || pr.state === PS_BROKEN) { focus.p = null; return false; }
+    // a lamp shot out ends the lock; a post tapped already broken stays locked till it falls
+    if (pr.gone || pr.state === PS_WRECK || (pr.state === PS_BROKEN && focus.ps !== PS_BROKEN)) { focus.p = null; return false; }
     x = pr.x; y = pr.y - 4; // bullets test the world 8px below their sprite
   } else return false;
   if (Math.hypot(x - player.x, y - player.y) > range) {
