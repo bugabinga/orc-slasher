@@ -6,31 +6,31 @@
       "entries": [
         {
           "name": "0x72",
-          "work": "DungeonTileset II — our knight, the goblins, shamans, ogres, every wall and floor of this cave",
+          "work": "DungeonTileset II — the crawlers, spitters and tanks (before they rotted), skulls and potions",
           "license": "CC0",
           "url": "0x72.itch.io/dungeontileset-ii",
           "thanks": "the beating heart of this dungeon. thank you for giving it away so freely."
         },
         {
           "name": "CraftPix.net",
-          "work": "Free Top-Down Orc Characters — the grunt, the blademaster, the general, in all four directions",
+          "work": "Free Top-Down Orc Characters — the walkers, brutes and sprinters, in all four directions, now thoroughly undead",
           "license": "CraftPix free license",
           "url": "craftpix.net/freebies",
-          "thanks": "three magnificent orcs that march, swing and fall with style."
+          "thanks": "three magnificent orcs that came back wrong, and better."
         },
         {
           "name": "Claude",
-          "work": "Warchief, Butcher, Shaman King, Nun, Quasimodo, berserkers, campfire, cards, whip, scythe & effects",
+          "work": "the abandoned city, all nine gunner heroes, every gun & rocket, the zombify pass, the bosses, campfire & effects",
           "license": "CC0",
           "url": "",
           "thanks": "drawn pixel by pixel, just for this cave."
         },
         {
           "name": "Kenney",
-          "work": "Tiny Dungeon pack — our trusty backup that never had to fight",
+          "work": "Roguelike Modern City — hydrants, mailboxes, newsboxes, bins, benches, cones, tires and street junk (grimed for the apocalypse)",
           "license": "CC0",
-          "url": "kenney.nl",
-          "thanks": "the patron saint of game jams everywhere."
+          "url": "opengameart.org/content/roguelike-modern-city-pack",
+          "thanks": "even the end of the world needs fire hydrants."
         }
       ]
     },
@@ -38,15 +38,29 @@
       "heading": "SOUND",
       "entries": [
         {
+          "name": "artisticdude",
+          "work": "Zombies Sound Pack — every groan, gurgle and death rattle of the horde",
+          "license": "CC0",
+          "url": "opengameart.org/content/zombies-sound-pack",
+          "thanks": "the city sounds properly dead now."
+        },
+        {
+          "name": "Planet Killer Games",
+          "work": "Residue SFX — explosions, the empty clip, acid spit and the medkit",
+          "license": "CC0",
+          "url": "planetkillergames.net",
+          "thanks": "boom, but better."
+        },
+        {
           "name": "WebAudio synth",
-          "work": "every slash, gem, roar and the ambient cave loop — generated live, no files",
+          "work": "every gunshot, beep and the ambient night loop — generated live",
           "license": "original",
           "url": "",
           "thanks": "four oscillators in a trench coat."
         },
         {
           "name": "OpenGameArt community",
-          "work": "researched CC0 packs by Juhani Junkala, rubberduck & friends (see docs/AUDIO.md)",
+          "work": "the home of the CC0 packs above (more in docs/AUDIO.md)",
           "license": "CC0 / CC-BY",
           "url": "opengameart.org",
           "thanks": "a treasure cave of libre sound, waiting for our next update."
@@ -70,7 +84,7 @@
       "entries": [
         {
           "name": "You",
-          "work": "for playing, for slashing, for sitting by our little fire",
+          "work": "for playing, for blasting, for sitting by our little fire",
           "license": "",
           "url": "",
           "thanks": "the cave is warmer with you in it."
@@ -78,5 +92,5 @@
       ]
     }
   ],
-  "outro": "…and to every orc that fell so this game could live. WAAAGH!"
+  "outro": "…and to every zombie that fell (twice) so this game could live. BRAAAINS!"
 }
