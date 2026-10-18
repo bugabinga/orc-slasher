@@ -95,6 +95,14 @@ await wait(1500);
 const dGoal = await G_(([wx, wy]) => Math.hypot(player.x - wx, player.y - 6 - wy), goalW);
 check("arrives at tapped spot", dGoal < 12 || await G_(() => !touch.goal), `${dGoal.toFixed(1)}px off`);
 
+// a hold during a walk-to replaces it: let go = stop, not resume the old walk
+await G_(() => { touch.goal = true; touch.gx = player.x + 300; touch.gy = player.y; touch.goalT = 0; });
+await touches("touchStart", [{ x: 40, y: 135, id: 1 }]);
+await wait(500);
+await touches("touchEnd", []);
+await wait(400);
+check("hold cancels an old walk-to", await G_(() => !touch.goal && Math.hypot(player.vx, player.vy) < 5), await G_(() => `goal ${touch.goal} speed ${Math.hypot(player.vx, player.vy).toFixed(1)}`));
+
 // flick -> dash
 await G_(() => { player.dashCd = 0; });
 await touches("touchStart", [{ x: 200, y: 140, id: 1 }]);

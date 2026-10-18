@@ -1818,7 +1818,9 @@ const endTouch = e => {
     if (focusAt(wx, wy)) { buzz(8); SFX.card(); learn(LEARN_AIM); return; }
     touch.goal = true; touch.gx = wx; touch.gy = wy; touch.goalT = 0;
     PATH.tx = -1e9; PATH.t = 0;
+    return;
   }
+  touch.goal = false; // a hold steered by hand: letting go stops, the old walk-to is gone
 };
 window.addEventListener("pointerup", endTouch);
 window.addEventListener("pointercancel", endTouch);
@@ -3565,19 +3567,14 @@ function sysBullets(dt) {
     // the world: buildings stop rounds, props soak them up (and break). The
     // whole move is swept in 3px steps: a round covers 6px a frame at 60fps
     // and ~19px at the dt cap, more than a lamp post (4px) or a wall tile
+    // and it only lands if no zombie in front of the impact stops the round first
+    let hit = 0;
     if (!dead) {
       const mx = PX[e] - ox, my = PY[e] - oy, steps = Math.max(1, Math.ceil(Math.hypot(mx, my) / 3));
-      let hit = 0;
       for (let k = 1; k <= steps && !hit; k++) {
         const hx = ox + mx * k / steps, hy = oy + my * k / steps;
         hit = solidAt(hx, hy + 8);
         if (hit && kind !== 2) { PX[e] = OX[e] = hx; PY[e] = OY[e] = hy; } // stop at the impact (flames flow on)
-      }
-      if (hit === 1) dead = kind !== 2 || Math.random() < 0.3;
-      else if (hit) {
-        damageProp(hit.p, st.dmg * (kind === 2 ? 0.4 : 1) * (FLAG[e] ? 2 : 1), ROT[e]);
-        if (kind !== 2) dead = true;
-        if (kind === 0) for (let k = 0; k < 3; k++) part(P_SPARK, PX[e], PY[e], rnd(-60, 60), rnd(-60, 60), 0.2, PC_SPARK, 2, rnd(10, 40));
       }
     }
     if (!dead) {
@@ -3593,6 +3590,12 @@ function sysBullets(dt) {
         hits.push(z);
         if (VAL[e]-- <= 0) dead = true;
       }
+    }
+    if (!dead && hit === 1) dead = kind !== 2 || Math.random() < 0.3;
+    else if (!dead && hit) {
+      damageProp(hit.p, st.dmg * (kind === 2 ? 0.4 : 1) * (FLAG[e] ? 2 : 1), ROT[e]);
+      if (kind !== 2) dead = true;
+      if (kind === 0) for (let k = 0; k < 3; k++) part(P_SPARK, PX[e], PY[e], rnd(-60, 60), rnd(-60, 60), 0.2, PC_SPARK, 2, rnd(10, 40));
     }
     if (dead) {
       if (kind === 1) explode(PX[e], PY[e], SIZE[e], st.dmg, FLAG[e] === 1);
