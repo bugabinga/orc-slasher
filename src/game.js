@@ -771,7 +771,7 @@ function genCell(ci, cj) {
     if (p.state === PS_GONE) { p.gone = true; p.fire = false; if (p.rect) p.rect.dead = true; }
     else if (p.state === PS_WRECK) { p.img = p.img.replace(/_(red|blue|white|green|rust)$/, "_burnt"); p.dk = "wreck"; p.hp = Infinity; }
     else if (p.state === PS_BROKEN) { p.img = "city_lamp_broken"; p.dk = "lampdead"; }
-    else if (p.state === PS_SMOKE || p.state === PS_FUSE) { p.state = PS_SMOKE; activate(p); }
+    else if (p.state === PS_SMOKE || p.state === PS_FUSE) p.state = PS_SMOKE; // collectLights wakes it on screen
   });
   for (const i of WORLD.cellTiles.get(ck) || EMPTY) { T[i] = T_RUBBLE; bid[i] = -1; }
 
@@ -2960,7 +2960,10 @@ function collectLights(cx, cy) {
   for (let i = 0; i < RINGS.n; i++) { const e = RINGS.dense[i]; addLight(PX[e], PY[e], SIZE[e] + 14, 0.5, 1.0, 0.45, 0.2); }
   if (kingPos) addLight(kingPos.x, kingPos.y - 12, 44, 0.6, 0.7, 0.45, 1.0);
   for (const c of cellsIn(cx - 70, cy - 70, cx + VW + 70, cy + VH + 70, scratchCells)) {
-    for (const p of c.props) if (p.fire && !p.gone) addLight(p.x, p.y - p.fireY, p.dk === "car" || p.dk === "wreck" ? 70 : 50 + Math.sin(G.t * 9 + p.t) * 5, 0.95, 1.0, 0.52, 0.2);
+    for (const p of c.props) {
+      if (p.state === PS_SMOKE && !p.gone && p.x > cx - 70 && p.x < cx + VW + 70 && p.y > cy - 70 && p.y < cy + VH + 70) activate(p);
+      if (p.fire && !p.gone) addLight(p.x, p.y - p.fireY, p.dk === "car" || p.dk === "wreck" ? 70 : 50 + Math.sin(G.t * 9 + p.t) * 5, 0.95, 1.0, 0.52, 0.2);
+    }
     for (const l of c.lamps) {
       if (l.prop.dk !== "lamp" || l.prop.gone) continue; // shot out
       if (l.flicker && Math.sin(G.t * 23 + l.t) + Math.sin(G.t * 7.3 + l.t * 2) > 1.1) continue; // dying bulb
@@ -3131,8 +3134,8 @@ function updateActiveProps(dt) {
     const p = activeProps[i];
     p.hitT = Math.max(0, p.hitT - dt);
     let busy = p.hitT > 0;
-    if (p.state === PS_SMOKE && !p.gone) {
-      busy = true;
+    if (p.state === PS_SMOKE && !p.gone && p.x > G.camX - 120 && p.x < G.camX + VW + 120 && p.y > G.camY - 120 && p.y < G.camY + VH + 160) {
+      busy = true; // only near the view: off screen it goes dormant (its cell may be evicted)
       if (Math.random() < dt * 8) part(P_SMOKE, p.x + rnd(-6, 6), p.y - 12, rnd(-5, 5), rnd(-25, -10), rnd(0.8, 1.4), PC_SMOKE, 0, 0, rnd(3, 5));
     }
     if (p.state === PS_FUSE && !p.gone) {
