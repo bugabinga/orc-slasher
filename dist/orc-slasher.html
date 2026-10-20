@@ -1720,7 +1720,7 @@ window.addEventListener("keydown", e => {
 });
 window.addEventListener("keyup", e => { keys[e.code] = false; });
 // alt-tab, a dialog, a lost window: nothing stays held
-window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouse.down = false; stick.id = -1; });
+window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouse.down = false; mouse.btns = 0; stick.id = -1; });
 canvas.addEventListener("contextmenu", e => e.preventDefault()); // right button dashes
 
 // desktop: WASD runs, the mouse aims (always), left button fires, Space /
@@ -1728,7 +1728,7 @@ canvas.addEventListener("contextmenu", e => e.preventDefault()); // right button
 // a tap anywhere else (or a second finger) dashes, and the gun aims itself.
 const COARSE = matchMedia("(pointer: coarse)").matches;
 let usingTouch = COARSE;
-const mouse = { x: 0, y: 0, down: false, seen: false };
+const mouse = { x: 0, y: 0, down: false, seen: false, btns: 0 };
 // stick.bx/by = base, x/y = finger (game px); vx/vy = output, length 0..1
 const STICK_R = 22;
 const stick = { id: -1, bx: 0, by: 0, x: 0, y: 0, vx: 0, vy: 0 };
@@ -1779,9 +1779,7 @@ canvas.addEventListener("pointerdown", e => {
   const playing = G.state === "play" && !G.paused && !G.wasted;
   if (e.pointerType === "mouse") {
     mouse.seen = true; mouse.x = p.x; mouse.y = p.y;
-    if (!playing) return;
-    if (e.button === 2) dashNow();
-    else if (e.button === 0) mouse.down = true;
+    mouseButtons(e);
     return;
   }
   if (!playing) return;
@@ -1804,14 +1802,24 @@ function stickOut() {
   const k = m < 0.18 ? 0 : Math.min(1, (m - 0.18) / 0.52);
   stick.vx = d ? dx / Math.min(d, STICK_R) * k : 0; stick.vy = d ? dy / Math.min(d, STICK_R) * k : 0;
 }
+// a second mouse button pressed while one is held arrives as a pointermove
+// with new `buttons`, not a pointerdown: read the bitmask on every event
+function mouseButtons(e) {
+  const b = e.buttons, playing = G.state === "play" && !G.paused && !G.wasted;
+  mouse.down = playing && (b & 1) !== 0;
+  if (playing && (b & 2) && !(mouse.btns & 2)) dashNow();
+  mouse.btns = b;
+}
 canvas.addEventListener("pointermove", e => {
-  if (e.pointerType === "mouse") { const m = canvasPos(e); mouse.x = m.x; mouse.y = m.y; mouse.seen = true; usingTouch = false; return; }
+  if (e.pointerType === "mouse") { const m = canvasPos(e); mouse.x = m.x; mouse.y = m.y; mouse.seen = true; usingTouch = false; mouseButtons(e); return; }
   if (e.pointerId !== stick.id) return;
   const p = canvasPos(e);
   stick.x = p.x; stick.y = p.y; stickOut();
 });
 const endPointer = e => {
-  if (e.pointerType === "mouse" && (e.button === 0 || e.type === "pointercancel")) mouse.down = false;
+  if (e.pointerType === "mouse") {
+    if (e.type === "pointercancel") { mouse.down = false; mouse.btns = 0; } else mouseButtons(e);
+  }
   if (e.pointerId === stick.id) { stick.id = -1; stick.vx = stick.vy = 0; }
 };
 window.addEventListener("pointerup", endPointer);
@@ -2668,7 +2676,7 @@ function newRun(weaponId) {
   say("The dead dragged the King into this city…", 1.2);
   say("I will find him. Locked and loaded.", 4.2);
   startWave(1);
-  hint.t = 0; hint.moveT = 0; hint.doneT = 0; hint.start.desk = learned.desk & LEARN_ALL; hint.start.touch = learned.touch & LEARN_ALL;
+  hint.t = 0; hint.moveT = 0; hint.doneT.desk = hint.doneT.touch = 0; hint.start.desk = learned.desk & LEARN_ALL; hint.start.touch = learned.touch & LEARN_ALL;
   startIntro();
   G.state = "play";
 }
@@ -4851,7 +4859,7 @@ function skipIntro() {
 const LEARN_MOVE = 1, LEARN_AIM = 2, LEARN_DASH = 4, LEARN_ALL = 7;
 const learned = { desk: 0, touch: 0 };
 try { Object.assign(learned, JSON.parse(localStorage.getItem("orcslasher_learned") || "{}")); } catch (e) { /* no storage */ }
-const hint = { t: 0, moveT: 0, doneT: 0, start: { desk: 0, touch: 0 } }; // start: learned when the run began
+const hint = { t: 0, moveT: 0, doneT: { desk: 0, touch: 0 }, start: { desk: 0, touch: 0 } }; // per input mode; start: learned when the run began
 function learn(bit) {
   const k = usingTouch ? "touch" : "desk";
   if (learned[k] & bit) return;
@@ -4863,13 +4871,14 @@ function updateHints(dt) {
   if (player.moving && player.dashT <= 0 && (hint.moveT += dt) > 0.35) learn(LEARN_MOVE);
   if (usingTouch) learn(LEARN_AIM); // the gun aims itself
   hint.t += dt;
-  if ((learned[usingTouch ? "touch" : "desk"] & LEARN_ALL) === LEARN_ALL) hint.doneT += dt;
+  const mode = usingTouch ? "touch" : "desk";
+  if ((learned[mode] & LEARN_ALL) === LEARN_ALL) hint.doneT[mode] += dt;
 }
 const HINTS_DESK = [[LEARN_MOVE, "WASD MOVE"], [LEARN_AIM, "MOUSE AIM + CLICK SHOOT"], [LEARN_DASH, "SPACE DASH"]];
 const HINTS_TOUCH = [[LEARN_MOVE, "STICK RUN"], [LEARN_DASH, "TAP DASH"]];
 function renderHints() {
   if (G.paused || G.wasted || hint.start[usingTouch ? "touch" : "desk"] === LEARN_ALL) return;
-  const a = Math.min(1, hint.t * 4) * Math.max(0, Math.min(1, 10 - hint.t, 1 - (hint.doneT - 0.8) * 3));
+  const a = Math.min(1, hint.t * 4) * Math.max(0, Math.min(1, 10 - hint.t, 1 - (hint.doneT[usingTouch ? "touch" : "desk"] - 0.8) * 3));
   if (a <= 0) return;
   const set = learned[usingTouch ? "touch" : "desk"], items = usingTouch ? HINTS_TOUCH : HINTS_DESK;
   let w = 0;
