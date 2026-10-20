@@ -2676,7 +2676,8 @@ function newRun(weaponId) {
   say("The dead dragged the King into this city…", 1.2);
   say("I will find him. Locked and loaded.", 4.2);
   startWave(1);
-  hint.t = 0; hint.moveT = 0; hint.doneT.desk = hint.doneT.touch = 0; hint.start.desk = learned.desk & LEARN_ALL; hint.start.touch = learned.touch & LEARN_ALL;
+  hint.moveT = 0;
+  for (const k of ["desk", "touch"]) { const h = hint[k]; h.t = h.doneT = 0; h.start = learned[k] & LEARN_ALL; }
   startIntro();
   G.state = "play";
 }
@@ -4859,7 +4860,9 @@ function skipIntro() {
 const LEARN_MOVE = 1, LEARN_AIM = 2, LEARN_DASH = 4, LEARN_ALL = 7;
 const learned = { desk: 0, touch: 0 };
 try { Object.assign(learned, JSON.parse(localStorage.getItem("orcslasher_learned") || "{}")); } catch (e) { /* no storage */ }
-const hint = { t: 0, moveT: 0, doneT: { desk: 0, touch: 0 }, start: { desk: 0, touch: 0 } }; // per input mode; start: learned when the run began
+// one record per input mode (a hybrid device can switch mid-run): seconds
+// shown, seconds since all were learned, what was learned when the run began
+const hint = { moveT: 0, desk: { t: 0, doneT: 0, start: 0 }, touch: { t: 0, doneT: 0, start: 0 } };
 function learn(bit) {
   const k = usingTouch ? "touch" : "desk";
   if (learned[k] & bit) return;
@@ -4870,15 +4873,16 @@ function updateHints(dt) {
   if (G.state !== "play" || introLocked() || G.paused || G.wasted) return;
   if (player.moving && player.dashT <= 0 && (hint.moveT += dt) > 0.35) learn(LEARN_MOVE);
   if (usingTouch) learn(LEARN_AIM); // the gun aims itself
-  hint.t += dt;
-  const mode = usingTouch ? "touch" : "desk";
-  if ((learned[mode] & LEARN_ALL) === LEARN_ALL) hint.doneT[mode] += dt;
+  const mode = usingTouch ? "touch" : "desk", h = hint[mode];
+  h.t += dt;
+  if ((learned[mode] & LEARN_ALL) === LEARN_ALL) h.doneT += dt;
 }
 const HINTS_DESK = [[LEARN_MOVE, "WASD MOVE"], [LEARN_AIM, "MOUSE AIM + CLICK SHOOT"], [LEARN_DASH, "SPACE DASH"]];
 const HINTS_TOUCH = [[LEARN_MOVE, "STICK RUN"], [LEARN_DASH, "TAP DASH"]];
 function renderHints() {
-  if (G.paused || G.wasted || hint.start[usingTouch ? "touch" : "desk"] === LEARN_ALL) return;
-  const a = Math.min(1, hint.t * 4) * Math.max(0, Math.min(1, 10 - hint.t, 1 - (hint.doneT[usingTouch ? "touch" : "desk"] - 0.8) * 3));
+  const h = hint[usingTouch ? "touch" : "desk"];
+  if (G.paused || G.wasted || h.start === LEARN_ALL) return;
+  const a = Math.min(1, h.t * 4) * Math.max(0, Math.min(1, 10 - h.t, 1 - (h.doneT - 0.8) * 3));
   if (a <= 0) return;
   const set = learned[usingTouch ? "touch" : "desk"], items = usingTouch ? HINTS_TOUCH : HINTS_DESK;
   let w = 0;

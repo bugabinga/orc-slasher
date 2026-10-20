@@ -116,7 +116,7 @@ check("auto-aim fires on touch", await G_(() => player.ammo < clipSize() || play
 
 check("all learned -> saved", await G_(() => JSON.parse(localStorage.getItem("orcslasher_learned")).touch === LEARN_ALL));
 await G_(() => { newRun("rifle"); });
-check("next run: no hint line", await G_(() => hint.start.touch === LEARN_ALL));
+check("next run: no hint line", await G_(() => hint.touch.start === LEARN_ALL));
 check("drop-in is short", await G_(() => DROP_T <= 0.4));
 await G_(() => skipIntro());
 
