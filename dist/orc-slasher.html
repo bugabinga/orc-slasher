@@ -1713,20 +1713,27 @@ window.addEventListener("keydown", e => {
     return;
   }
   if (G.state !== "play") devFeedKey(e.key);
+  // dash on the press itself (a tap can start and end between two frames);
+  // holding the key doesn't chain dashes
+  if (["Space", "ShiftLeft", "ShiftRight"].includes(e.code) && !e.repeat && G.state === "play" && !G.paused && !G.wasted && !introLocked()) dashNow();
   handleKey(e.code);
 });
 window.addEventListener("keyup", e => { keys[e.code] = false; });
+// alt-tab, a dialog, a lost window: nothing stays held
+window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouse.down = false; mouse.btns = 0; stick.id = -1; });
+canvas.addEventListener("contextmenu", e => e.preventDefault()); // right button dashes
 
-// touch: no virtual sticks. Hold = the hero runs toward your finger (easing
-// in close to it); tap the street = walk there; tap a zombie, car or barrel =
-// focus fire on it; flick = dash that way; any second finger = dash now.
-// Shooting stays automatic.
+// desktop: WASD runs, the mouse aims (always), left button fires, Space /
+// Shift / right button dash. Touch: a floating stick in the lower right runs,
+// a tap anywhere else (or a second finger) dashes, and the gun aims itself.
 const COARSE = matchMedia("(pointer: coarse)").matches;
 let usingTouch = COARSE;
-const touch = { id: -1, x: 0, y: 0, sx: 0, sy: 0, t0: 0, far: 0, goal: false, gx: 0, gy: 0, goalT: 0 };
-const TAP_MS = 230, TAP_PX = 9, FLICK_PX = 20;
-// what the auto-aim prefers while it lives and is in range: a zombie or a prop
-const focus = { z: null, e: -1, p: null, ps: 0, lostT: 0 };
+const mouse = { x: 0, y: 0, down: false, seen: false, btns: 0 };
+// stick.bx/by = base, x/y = finger (game px); vx/vy = output, length 0..1
+const STICK_R = 22;
+const stick = { id: -1, bx: 0, by: 0, x: 0, y: 0, vx: 0, vy: 0 };
+const stickHome = () => ({ x: VW - 46, y: VH - 46 });
+const inStickZone = p => p.x > VW * 0.55 && p.y > VH * 0.42;
 const tapPad = () => (usingTouch ? 9 : 3);
 function canvasPos(t) {
   const r = canvas.getBoundingClientRect();
@@ -1748,32 +1755,30 @@ function goFullscreenLandscape() { // phones: first tap goes fullscreen + landsc
       .catch(() => {});
   }
 }
-// tapped world point -> focus a zombie or breakable prop there, else false
-function focusAt(wx, wy) {
-  const z = nearestEnemy({ x: wx, y: wy }, 16);
-  if (z) { focus.z = z; focus.e = z.e; focus.p = null; focus.lostT = 0; return true; }
-  let best = null, bd = 11; // props sit still: a tighter grab than moving zombies
-  for (const c of cellsIn(wx - 24, wy - 24, wx + 24, wy + 24, scratchCells2)) {
-    for (const pr of c.props) {
-      if (pr.gone || pr.hp === Infinity || pr.state === PS_WRECK) continue;
-      const d = Math.hypot(pr.x - wx, pr.y - 8 - wy);
-      if (d < bd) { bd = d; best = pr; }
-    }
-  }
-  if (!best) return false;
-  focus.z = null; focus.e = -1; focus.p = best; focus.ps = best.state; focus.lostT = 0;
-  return true;
+// what the keys / stick ask for right now, length <= 1 (written to MOVE_V)
+const MOVE_V = { x: 0, y: 0 };
+function moveInput() {
+  let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  let my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
+  if (stick.id !== -1) { mx = stick.vx; my = stick.vy; }
+  const ml = Math.hypot(mx, my);
+  if (ml > 1) { mx /= ml; my /= ml; }
+  MOVE_V.x = mx; MOVE_V.y = my;
+  return MOVE_V;
 }
-function touchDash(dx, dy) {
-  const d = Math.hypot(dx, dy);
-  if (d < 0.01) { dx = player.vx; dy = player.vy; }
+// dash where you're heading (read live: the key may have gone down this
+// very frame); standing still: where you aim
+function dashNow() {
+  const mv = moveInput();
+  let dx = mv.x, dy = mv.y;
+  if (Math.hypot(dx, dy) < 0.1) { dx = Math.cos(player.atkAng); dy = Math.sin(player.atkAng); }
+  if (Math.hypot(dx, dy) < 0.1) { dx = player.facing; dy = 0; }
   const l = Math.hypot(dx, dy);
-  if (l < 0.01) { dx = player.facing; dy = 0; } else { dx /= l; dy /= l; }
-  tryDash(dx, dy);
+  tryDash(dx / l, dy / l);
 }
 canvas.addEventListener("pointerdown", e => {
-  if (e.pointerType === "touch") { usingTouch = true; goFullscreenLandscape(); }
-  else if (e.pointerType === "mouse") usingTouch = false;
+  if (e.pointerType !== "mouse") { usingTouch = true; goFullscreenLandscape(); } // a pen plays like a finger
+  else usingTouch = false;
   if (G.state === "play" && skipIntro()) return;
   const p = canvasPos(e);
   if (passModal.open || (["title", "cls", "select"].includes(G.state) && keyBtnRect &&
@@ -1783,47 +1788,55 @@ canvas.addEventListener("pointerdown", e => {
     handleClick(p.x, p.y);
     return;
   }
-  const playing = G.state === "play" && !G.paused && !G.wasted;
-  if (e.pointerType !== "mouse" && playing && touch.id !== -1 && e.pointerId !== touch.id) {
-    touchDash(touch.x - VW / 2, touch.y - VH / 2); // second finger: dash where the first one steers
-    return;
-  }
   if (handleClick(p.x, p.y)) return;
-  if (e.pointerType === "mouse") { // mouse: hold to aim and fire where you point
-    mouse.down = true; mouse.seen = true; mouse.x = p.x; mouse.y = p.y;
+  const playing = G.state === "play" && !G.paused && !G.wasted;
+  if (e.pointerType === "mouse") {
+    mouse.seen = true; mouse.x = p.x; mouse.y = p.y;
+    mouseButtons(e);
     return;
   }
   if (!playing) return;
-  touch.id = e.pointerId; touch.x = touch.sx = p.x; touch.y = touch.sy = p.y;
-  PATH.tx = -1e9; PATH.n = 0;
-  touch.t0 = performance.now(); touch.far = 0;
-});
-canvas.addEventListener("pointermove", e => {
-  if (e.pointerType === "mouse") { const m = canvasPos(e); mouse.x = m.x; mouse.y = m.y; mouse.seen = true; }
-  if (e.pointerId !== touch.id) return;
-  const p = canvasPos(e);
-  touch.x = p.x; touch.y = p.y;
-  touch.far = Math.max(touch.far, Math.hypot(p.x - touch.sx, p.y - touch.sy));
-  if (touch.far > TAP_PX) touch.goal = false; // steering by hand cancels a walk-to
-});
-const endTouch = e => {
-  if (e.pointerType === "mouse") mouse.down = false;
-  if (e.pointerId !== touch.id) return;
-  touch.id = -1;
-  if (G.state !== "play" || G.paused || e.type === "pointercancel") return;
-  const ms = performance.now() - touch.t0, dx = touch.x - touch.sx, dy = touch.y - touch.sy, d = Math.hypot(dx, dy);
-  if (ms < TAP_MS && d > FLICK_PX) { touchDash(dx, dy); return; } // flick
-  if (ms < TAP_MS && touch.far <= TAP_PX) { // tap
-    const wx = touch.sx + G.cam.x, wy = touch.sy + G.cam.y;
-    if (focusAt(wx, wy)) { buzz(8); SFX.card(); learn(LEARN_AIM); return; }
-    touch.goal = true; touch.gx = wx; touch.gy = wy; touch.goalT = 0;
-    PATH.tx = -1e9; PATH.t = 0;
+  if (stick.id === -1 && inStickZone(p)) {
+    const h = stickHome();
+    stick.id = e.pointerId;
+    stick.bx = clamp(p.x, VW * 0.55 + STICK_R, VW - STICK_R - 4); stick.by = clamp(p.y, VH * 0.42 + STICK_R, VH - STICK_R - 4);
+    if (Math.hypot(p.x - h.x, p.y - h.y) < STICK_R * 1.5) { stick.bx = h.x; stick.by = h.y; } // on the drawn stick: use it as is
+    stick.x = p.x; stick.y = p.y; stickOut();
     return;
   }
-  touch.goal = false; // a hold steered by hand: letting go stops, the old walk-to is gone
+  dashNow();
+});
+function stickOut() {
+  let dx = stick.x - stick.bx, dy = stick.y - stick.by;
+  const d = Math.hypot(dx, dy);
+  if (d > STICK_R) { dx *= STICK_R / d; dy *= STICK_R / d; }
+  const m = Math.min(1, d / STICK_R);
+  // small dead zone, then full speed from ~70% out: running is the default
+  const k = m < 0.18 ? 0 : Math.min(1, (m - 0.18) / 0.52);
+  stick.vx = d ? dx / Math.min(d, STICK_R) * k : 0; stick.vy = d ? dy / Math.min(d, STICK_R) * k : 0;
+}
+// a second mouse button pressed while one is held arrives as a pointermove
+// with new `buttons`, not a pointerdown: read the bitmask on every event
+function mouseButtons(e) {
+  const b = e.buttons, playing = G.state === "play" && !G.paused && !G.wasted;
+  mouse.down = playing && (b & 1) !== 0;
+  if (playing && (b & 2) && !(mouse.btns & 2)) dashNow();
+  mouse.btns = b;
+}
+canvas.addEventListener("pointermove", e => {
+  if (e.pointerType === "mouse") { const m = canvasPos(e); mouse.x = m.x; mouse.y = m.y; mouse.seen = true; usingTouch = false; mouseButtons(e); return; }
+  if (e.pointerId !== stick.id) return;
+  const p = canvasPos(e);
+  stick.x = p.x; stick.y = p.y; stickOut();
+});
+const endPointer = e => {
+  if (e.pointerType === "mouse") {
+    if (e.type === "pointercancel") { mouse.down = false; mouse.btns = 0; } else mouseButtons(e);
+  }
+  if (e.pointerId === stick.id) { stick.id = -1; stick.vx = stick.vy = 0; }
 };
-window.addEventListener("pointerup", endTouch);
-window.addEventListener("pointercancel", endTouch);
+window.addEventListener("pointerup", endPointer);
+window.addEventListener("pointercancel", endPointer);
 
 // haptics (Android; iOS Safari has no vibrate): short, rate-limited
 let buzzT = 0;
@@ -2051,7 +2064,7 @@ function genCell(ci, cj) {
     const id = cell.buildings.length, bwid = bx1 - bx0 + 1;
     const doors = new Set([bx0 + ri(1, Math.max(1, bwid - 2))]);
     if (bwid >= 7 && R() < 0.5) doors.add(bx0 + ri(1, bwid - 2));
-    cell.buildings.push({ wall: rp(WALL_STYLES), roof: ri(0, 3), doors });
+    cell.buildings.push({ wall: rp(WALL_STYLES), roof: ri(0, 3), doors, bx0, bx1, by0, by1 });
     for (let ty = by0; ty <= by1; ty++) for (let tx = bx0; tx <= bx1; tx++) { T[L(tx, ty)] = T_BLD; bid[L(tx, ty)] = id; }
     for (const d of doors) if (by1 + 1 <= y1 && T[L(d, by1 + 1)] !== T_BLD) cell.spawns.push({ x: d * TILE + 8, y: (by1 + 1) * TILE + 8 });
   }
@@ -2441,121 +2454,6 @@ function updateFlow() {
 }
 const DIR_X = [1, -1, 0, 0, 1, 1, -1, -1], DIR_Y = [0, 0, 1, -1, 1, -1, 1, -1];
 
-// hero pathing (tap-to-walk / hold-to-run): A* over walkable tiles in a
-// window around the hero, 8-way without corner cutting, then string-pulled
-// so the hero runs straight wherever a hero-wide line is clear. Typed arrays
-// with a generation stamp: nothing is allocated or cleared per search.
-const AS_R = 40, AS_N = AS_R * 2 + 1, AS_NODES = AS_N * AS_N;
-const asG = new Float32Array(AS_NODES), asF = new Float32Array(AS_NODES), asFrom = new Int32Array(AS_NODES);
-const asSeen = new Uint32Array(AS_NODES), asShut = new Uint32Array(AS_NODES), asWalk = new Uint8Array(AS_NODES), asWalkGen = new Uint32Array(AS_NODES);
-const asHeap = new Int32Array(AS_NODES * 4);
-let asGen = 0, asX0 = 0, asY0 = 0;
-const PATH = { n: 0, i: 0, x: new Float32Array(64), y: new Float32Array(64), tx: -1e9, ty: -1e9, t: 0, stuck: 0, lastD: 0 };
-// stricter than walkAt: lamp posts, cones and barricades don't close a tile
-// for zombies (they steer around them) but the hero's route must avoid them
-function heroWalk(tx, ty) {
-  if (!walkAt(tx, ty)) return 0;
-  for (const r of rectsAt(tx, ty)) if (!r.dead) return 0;
-  return 1;
-}
-function asWalkable(i) {
-  if (asWalkGen[i] !== asGen) { asWalkGen[i] = asGen; asWalk[i] = heroWalk(asX0 + i % AS_N, asY0 + ((i / AS_N) | 0)); }
-  return asWalk[i];
-}
-function heapPush(n, i) {
-  let k = n;
-  asHeap[k] = i;
-  while (k > 0) { const p = (k - 1) >> 1; if (asF[asHeap[p]] <= asF[i]) break; asHeap[k] = asHeap[p]; asHeap[p] = i; k = p; }
-}
-function heapPop(n) { // n = size before the pop
-  const top = asHeap[0], last = asHeap[n - 1];
-  let k = 0;
-  n--;
-  asHeap[0] = last;
-  for (;;) {
-    const l = k * 2 + 1, r = l + 1;
-    let m = k;
-    if (l < n && asF[asHeap[l]] < asF[asHeap[m]]) m = l;
-    if (r < n && asF[asHeap[r]] < asF[asHeap[m]]) m = r;
-    if (m === k) break;
-    const t = asHeap[k]; asHeap[k] = asHeap[m]; asHeap[m] = t; k = m;
-  }
-  return top;
-}
-// is a hero-wide straight run from a to b clear? (world px, feet)
-function clearRun(ax, ay, bx, by) {
-  const dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy), steps = Math.ceil(d / 4);
-  const nx = d ? -dy / d * 6 : 0, ny = d ? dx / d * 6 : 0;
-  for (let k = 0; k <= steps; k++) {
-    const x = ax + dx * k / steps, y = ay + dy * k / steps;
-    if (!heroWalk(Math.floor(x / TILE), Math.floor(y / TILE)) ||
-        !heroWalk(Math.floor((x + nx) / TILE), Math.floor((y + ny) / TILE)) ||
-        !heroWalk(Math.floor((x - nx) / TILE), Math.floor((y - ny) / TILE))) return false;
-  }
-  return true;
-}
-// plan from the hero's feet to (gx, gy); fills PATH, false = walk straight
-function planPath(gx, gy) {
-  PATH.n = 0; PATH.i = 0; PATH.stuck = 0; PATH.lastD = 1e9;
-  const sx = player.x, sy = player.y;
-  if (clearRun(sx, sy, gx, gy)) { PATH.x[0] = gx; PATH.y[0] = gy; PATH.n = 1; return true; }
-  asGen++;
-  const stx = Math.floor(sx / TILE), sty = Math.floor(sy / TILE);
-  asX0 = stx - AS_R; asY0 = sty - AS_R;
-  let gtx = clamp(Math.floor(gx / TILE) - asX0, 0, AS_N - 1), gty = clamp(Math.floor(gy / TILE) - asY0, 0, AS_N - 1);
-  // tapped into a wall or a car: aim for the nearest open tile instead
-  if (!asWalkable(gty * AS_N + gtx)) {
-    let best = -1, bd = 1e9;
-    for (let r = 1; r <= 3 && best < 0; r++) for (let oy = -r; oy <= r; oy++) for (let ox = -r; ox <= r; ox++) {
-      const x = gtx + ox, y = gty + oy;
-      if (x < 0 || y < 0 || x >= AS_N || y >= AS_N || !asWalkable(y * AS_N + x)) continue;
-      const d = ox * ox + oy * oy;
-      if (d < bd) { bd = d; best = y * AS_N + x; }
-    }
-    if (best < 0) return false;
-    gtx = best % AS_N; gty = (best / AS_N) | 0;
-  }
-  const start = AS_R * AS_N + AS_R, goal = gty * AS_N + gtx;
-  const h = i => { const ax = Math.abs(i % AS_N - gtx), ay = Math.abs(((i / AS_N) | 0) - gty); return ax + ay - 0.586 * Math.min(ax, ay); };
-  asG[start] = 0; asF[start] = h(start); asFrom[start] = -1; asSeen[start] = asGen;
-  let n = 0;
-  heapPush(n++, start);
-  let found = false, budget = 3000; // an unreachable target can't cost a long frame
-  while (n > 0 && budget-- > 0) {
-    const cur = heapPop(n--);
-    if (asShut[cur] === asGen) continue;
-    asShut[cur] = asGen;
-    if (cur === goal) { found = true; break; }
-    const cx = cur % AS_N, cy = (cur / AS_N) | 0;
-    for (let k = 0; k < 8; k++) {
-      const ox = DIR_X[k], oy = DIR_Y[k], x = cx + ox, y = cy + oy;
-      if (x < 0 || y < 0 || x >= AS_N || y >= AS_N) continue;
-      const j = y * AS_N + x;
-      if (asShut[j] === asGen || !asWalkable(j)) continue;
-      if (ox && oy && (!asWalkable(cy * AS_N + x) || !asWalkable(y * AS_N + cx))) continue; // no corner cutting
-      const g = asG[cur] + (ox && oy ? 1.414 : 1);
-      if (asSeen[j] === asGen && g >= asG[j]) continue;
-      asSeen[j] = asGen; asG[j] = g; asF[j] = g + h(j); asFrom[j] = cur;
-      if (n < asHeap.length) heapPush(n++, j);
-    }
-  }
-  if (!found) return false;
-  // tile centres goal -> start (the goal itself if it is open ground)
-  const cx = asTmpX, cy = asTmpY;
-  let m = 0;
-  for (let i = goal; i !== -1; i = asFrom[i]) { cx[m] = (asX0 + i % AS_N) * TILE + 8; cy[m] = (asY0 + ((i / AS_N) | 0)) * TILE + 8; m++; }
-  if (heroWalk(Math.floor(gx / TILE), Math.floor(gy / TILE))) { cx[0] = gx; cy[0] = gy; }
-  // string-pull: from each anchor run on while the next centre is in clear view
-  let ax = sx, ay = sy, k = m - 1;
-  while (k > 0 && PATH.n < PATH.x.length) {
-    let j = k - 1;
-    while (j > 0 && clearRun(ax, ay, cx[j - 1], cy[j - 1])) j--;
-    PATH.x[PATH.n] = cx[j]; PATH.y[PATH.n] = cy[j]; PATH.n++;
-    ax = cx[j]; ay = cy[j]; k = j;
-  }
-  return PATH.n > 0;
-}
-const asTmpX = new Float32Array(AS_NODES), asTmpY = new Float32Array(AS_NODES);
 function downhill(i) {
   const N = FLOW_N, x = i % N, y = (i - x) / N, d0 = flowDist[i];
   if (d0 === 0 || d0 === 1) return -1; // close enough to charge straight in
@@ -2588,7 +2486,7 @@ const G = {
   state: "title", // title | play | campfire | gameover | victory
   t: 0, wave: 0, kills: 0, coins: 0, groanT: 0,
   score: 0, scoreShown: 0, combo: 0, comboT: 0, mult: 1, bestCombo: 0,
-  trauma: 0, hitStop: 0, slowMo: 0, wasted: 0, kickX: 0, kickY: 0, camX: 0, camY: 0,
+  trauma: 0, hitStop: 0, slowMo: 0, wasted: 0, kickX: 0, kickY: 0, camX: 0, camY: 0, leadX: 0, leadY: 0,
   pager: { cur: "", t: 0 },
   endless: false,
   cls: "marine", weapon: "rifle",
@@ -2770,7 +2668,7 @@ function newRun(weaponId) {
     x: startPos.x, y: startPos.y, r: 6, hp: stats.maxHp, level: 1, xp: 0,
     stats, banked: 0,
     facing: 1, moving: false, animT: 0,
-    atkCd: 0, atkAng: 0, hurtCd: 0, dashCd: 0, dashCdWas: 0, dashT: 0, dashX: 0, dashY: 0,
+    atkCd: 0, atkAng: 0, hurtCd: 0, dashN: DASH_MAX, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: 0, reloadT: 0, recoil: 0, lastShot: -9, akimboSide: 1,
     vx: 0, vy: 0, hpLag: stats.maxHp, dashBuf: 0, ghostT: 0, dropZ: 0,
     runList: ANIM[CLASSES[G.cls].anim + "_run"], idleList: ANIM[CLASSES[G.cls].anim + "_idle"],
@@ -2779,20 +2677,20 @@ function newRun(weaponId) {
   flowT = 0;
   fxState.rain = Math.random() < 0.65 ? 1 : 0; // most nights it rains
   fxState.nextBolt = rnd(12, 30); shocks.length = 0;
-  eReset(); banners.length = 0; activeProps.length = 0;
+  eReset(); banners.length = feedLines.length = 0; activeProps.length = 0; collapses.length = 0;
   spawnQueue = []; spawnTimer = 0;
   G.wave = 0; G.kills = 0; G.coins = 0; G.t = 0; G.endless = false; G.banked = 0; G.paused = false;
   G.sayQ = []; G.kingSeen = false; G.saidLowHp = false;
-  touch.id = -1; touch.goal = false; focus.z = focus.p = null;
+  stick.id = -1; stick.vx = stick.vy = 0; mouse.down = false;
   G.score = G.scoreShown = 0; G.combo = 0; G.comboT = 0; G.mult = 1; G.bestCombo = 0;
   G.trauma = 0; G.hitStop = 0; G.slowMo = 0; G.wasted = 0; G.kickX = G.kickY = 0;
-  G.camX = player.x - VW / 2; G.camY = player.y - VH / 2;
+  G.camX = player.x - VW / 2; G.camY = player.y - VH / 2; G.leadX = G.leadY = 0;
   G.pager.cur = ""; G.pager.t = 0;
   say("The dead dragged the King into this city…", 1.2);
   say("I will find him. Locked and loaded.", 4.2);
   startWave(1);
-  hint.cur = 0; hint.moveT = 0; hint.popT = 0;
-  startIntro(1);
+  for (const k of ["desk", "touch"]) { const h = hint[k]; h.t = h.moveT = h.doneT = 0; h.start = learned[k] & LEARN_ALL; }
+  startIntro();
   G.state = "play";
 }
 
@@ -2872,7 +2770,6 @@ function waveComposition(w) {
 
 function startWave(w) {
   G.wave = w;
-  if (w > 1) startIntro(2);
   const comp = waveComposition(w);
   // bosses/bigs first, rest shuffled, all spread over a fixed wave window
   comp.sort((a, b) => (E_TYPES[b].bossBar ? 1 : 0) - (E_TYPES[a].bossBar ? 1 : 0) || Math.random() - 0.5);
@@ -2880,8 +2777,8 @@ function startWave(w) {
   spawnQueue = comp.map((type, i) => ({ type, at: 1 + (i / comp.length) * waveDur + rnd(0, 0.3) }));
   spawnTimer = 0;
   const bossWave = w % 5 === 0;
-  if (bossWave) banner(BOSS_NAMES[bossFor(w)], "IS COMING FOR YOU", "#ff4d4d", 2.6, true);
-  else banner("WAVE " + w, w === 1 ? "FIND THE KING" : "SURVIVE", "#ffd166", 2.2, true);
+  if (bossWave) banner(BOSS_NAMES[bossFor(w)], "IS COMING FOR YOU", "#ff4d4d", 2.4);
+  else banner("WAVE " + w, w === 1 ? "FIND THE KING" : "SURVIVE", "#ffd166", 1.6);
   if (bossWave) { SFX.bossRoar(); say(bossLine(bossFor(w)), 1.4); }
   if (w >= 10 && !UN.ghost) {
     UN.ghost = true; saveUnlocks();
@@ -3273,15 +3170,15 @@ function addKillScore(z, how) {
   G.combo++; G.comboT = 3;
   if (G.combo > G.bestCombo) G.bestCombo = G.combo;
   const m = Math.min(10, 1 + Math.floor(G.combo / 6));
-  if (m > G.mult) { G.mult = m; banner(`x${m} MULTIPLIER`, "", "#ffd166", 1.2, true); SFX.level(); }
+  if (m > G.mult) { G.mult = m; feed(`x${m} MULTIPLIER`, "#ffd166"); SFX.level(); }
   let pts = z.score * 10 * G.mult;
-  if (z.env) { pts *= 2; popText(z.x, z.y - 22, "CARNAGE x2", "#ff8a2a", true); }
+  if (z.env) { pts *= 2; feed("CARNAGE x2", "#ff8a2a"); }
   else if (how === HOW_GIB) pts = Math.round(pts * 1.5);
   G.score += pts;
-  for (const [n, s] of FRENZY) if (G.combo === n) { banner(s, `${n} KILL COMBO`, "#ff4d4d", 1.8, true); buzz(30); G.trauma = Math.min(1, G.trauma + 0.3); }
+  for (const [n, s] of FRENZY) if (G.combo === n) { feed(`${s} ${n} KILLS`, "#ff4d4d"); buzz(30); G.trauma = Math.min(1, G.trauma + 0.3); }
 }
 function breakCombo() {
-  if (G.combo >= 6) popText(player.x, player.y - 34, "COMBO LOST", "#8fa0b8", false);
+  if (G.combo >= 6) feed("COMBO LOST", "#8fa0b8");
   G.combo = 0; G.mult = 1; G.comboT = 0;
 }
 
@@ -3294,13 +3191,21 @@ function popText(x, y, s, col, big = false, life = 0.8) {
   t.s = s; t.col = col; t.big = big; t.vy = big ? -10 : -26;
   PX[e] = x; PY[e] = y; LIFE[e] = life; MAXL[e] = life;
 }
-// big centre-screen messages (GTA style): wave starts, frenzies, WASTED
+// headlines in a band under the wave counter (wave starts, bosses, unlocks);
+// only WASTED takes the centre of the screen
 const banners = [];
-function banner(s, sub, col, dur = 2, punch = false) {
+function banner(s, sub, col, dur = 2, center = false) {
   // one headline at a time: older ones fade out fast instead of stacking
   for (const b of banners) b.t = Math.max(b.t, b.dur * 0.8);
   if (banners.length > 3) banners.shift();
-  banners.push({ s, sub, col, t: 0, dur, punch, y: 104 });
+  banners.push({ s, sub, col, t: 0, dur, center });
+}
+// small right-aligned lines under the pause button: combo, multiplier, level
+// ups, close calls. Newest on top, a few at a time, gone in ~1.6s
+const feedLines = [];
+function feed(s, col) {
+  if (feedLines.length >= 4) feedLines.pop();
+  feedLines.unshift({ s, col, t: 0 });
 }
 
 // --------------------------------------------------------------- combat ---
@@ -3410,49 +3315,19 @@ function pickup(kind, x, y, v) {
 // ------------------------------------------------------------------- guns --
 const clipSize = () => Math.max(1, Math.round(WEAPONS[G.weapon].clip * player.stats.clipMul));
 const handPos = () => ({ x: player.x + player.facing * 2, y: player.y - 8 });
-const aiming = () => G.t - player.lastShot < 0.8;
-// mouse aim: hold the button to shoot where you point (barrels! cars!)
-const mouse = { x: 0, y: 0, down: false, seen: false };
-
-// the focused target's aim point into FOCUS_V while it is valid and in range;
-// a target that stays out of range for 3s is dropped
-const FOCUS_V = { x: 0, y: 0 };
-function focusTarget(range) {
-  let x, y;
-  if (focus.z) {
-    if (focus.z.dead || focus.z.e !== focus.e || !eAlive(focus.e)) { focus.z = null; return false; }
-    x = focus.z.x; y = focus.z.y;
-  } else if (focus.p) {
-    const pr = focus.p;
-    // a lamp shot out ends the lock; a post tapped already broken stays locked till it falls
-    if (pr.gone || pr.state === PS_WRECK || (pr.state === PS_BROKEN && focus.ps !== PS_BROKEN)) { focus.p = null; return false; }
-    x = pr.x; y = pr.y - 4; // bullets test the world 8px below their sprite
-  } else return false;
-  if (Math.hypot(x - player.x, y - player.y) > range) {
-    if (!focus.lostT) focus.lostT = G.t;
-    else if (G.t - focus.lostT > 3) { focus.z = null; focus.p = null; }
-    return false;
-  }
-  focus.lostT = 0;
-  FOCUS_V.x = x; FOCUS_V.y = y;
-  return true;
-}
+// desktop: the gun always follows the cursor; touch: it points while firing
+const aiming = () => (!usingTouch && mouse.seen) || G.t - player.lastShot < 0.8;
 function fireGun() {
   const st = player.stats, w = WEAPONS[G.weapon];
   let tx, ty;
-  if (mouse.down) {
+  if (!usingTouch) { // point and click: the shot goes where the cursor is
+    if (!mouse.down) return;
     tx = mouse.x + G.cam.x; ty = mouse.y + G.cam.y + 4;
-    const near = nearestEnemy({ x: tx, y: ty }, 18); // gentle snap onto a zombie under the cursor
-    if (near) { tx = near.x; ty = near.y; }
     learn(LEARN_AIM);
   } else {
-    const f = focusTarget(st.range * 1.15);
-    if (f) { tx = FOCUS_V.x; ty = FOCUS_V.y; }
-    else {
-      const target = nearestEnemy(player, st.range);
-      if (!target) return;
-      tx = target.x; ty = target.y;
-    }
+    const target = nearestEnemy(player, st.range);
+    if (!target) return;
+    tx = target.x; ty = target.y;
   }
   player.atkCd = 1 / st.atkSpd;
   const hand = handPos();
@@ -3499,7 +3374,6 @@ function fireGun() {
   player.ammo--;
   if (player.ammo <= 0) {
     player.reloadT = w.reload * st.reloadMul;
-    popText(player.x, player.y - 28, "RELOAD", "#ffd166");
     sample("clip", 0.5);
   }
 }
@@ -3592,7 +3466,10 @@ function sysBullets(dt) {
         if (VAL[e]-- <= 0) dead = true;
       }
     }
-    if (!dead && hit === 1) dead = kind !== 2 || Math.random() < 0.3;
+    if (!dead && hit === 1) {
+      dead = kind !== 2 || Math.random() < 0.3;
+      if (kind === 0) damageTile(Math.floor(PX[e] / TILE), Math.floor((PY[e] + 8) / TILE), st.dmg * (FLAG[e] ? 1.2 : 0.6), false);
+    }
     else if (!dead && hit) {
       damageProp(hit.p, st.dmg * (kind === 2 ? 0.4 : 1) * (FLAG[e] ? 2 : 1), ROT[e]);
       if (kind !== 2) dead = true;
@@ -3875,7 +3752,7 @@ function sysPickups(dt) {
       while (player.xp >= xpNeeded(player.level)) {
         player.xp -= xpNeeded(player.level);
         player.level++; player.banked++;
-        banner("LEVEL UP", `LV ${player.level}`, "#7bd88f", 1.2);
+        feed(`LEVEL UP  LV ${player.level}`, "#7bd88f");
         SFX.level();
       }
     } else if (kind === PK_COIN) { G.coins++; G.score += 25 * G.mult; SFX.coinS(); }
@@ -3895,6 +3772,7 @@ function sysTexts(dt) {
     if (LIFE[e] <= 0) eKill(e);
   }
   for (let i = banners.length - 1; i >= 0; i--) { banners[i].t += dt; if (banners[i].t >= banners[i].dur) banners.splice(i, 1); }
+  for (let i = feedLines.length - 1; i >= 0; i--) if ((feedLines[i].t += dt) >= 1.6) feedLines.splice(i, 1);
   // the pager: one message at a time, typed out
   const pg = G.pager;
   if (pg.cur) { pg.t += dt; if (pg.t > pg.cur.length * 0.035 + 3) pg.cur = ""; }
@@ -3904,56 +3782,39 @@ function sysTexts(dt) {
 // ------------------------------------------------------------ player ------
 // smooth movement: velocity eases toward the stick, the dash is an impulse
 // with invulnerability and afterimages; the camera leads where you aim
+const DASH_MAX = 2, DASH_CD = 1.1, DASH_T = 0.18; // two charges; each comes back after DASH_CD
 function updatePlayer(dt) {
   const st = player.stats;
-  let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
-  let my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
-  // touch: run toward the held finger, or walk to the last tapped spot.
-  // Full speed beyond ~34px, easing to a stop on the spot (no overshoot)
-  // Routes around buildings and wrecks via planPath; re-plans when the target
-  // crosses into another tile (at most 5x/s) or progress stalls
-  if (touch.id !== -1 || touch.goal) {
-    const gx = touch.id !== -1 ? touch.x + G.cam.x : touch.gx;
-    const gy = (touch.id !== -1 ? touch.y + G.cam.y : touch.gy) + 6; // the finger marks the body, the path the feet
-    PATH.t -= dt;
-    const moved = Math.floor(gx / TILE) !== Math.floor(PATH.tx / TILE) || Math.floor(gy / TILE) !== Math.floor(PATH.ty / TILE);
-    if ((moved && PATH.t <= 0) || PATH.stuck > 0.6) {
-      PATH.tx = gx; PATH.ty = gy; PATH.t = 0.2;
-      if (!planPath(gx, gy)) PATH.n = 0;
-    }
-    const ends = PATH.n && heroWalk(Math.floor(gx / TILE), Math.floor(gy / TILE));
-    if (ends) { PATH.x[PATH.n - 1] = gx; PATH.y[PATH.n - 1] = gy; } // the last leg follows the finger exactly
-    while (PATH.i < PATH.n - 1 && Math.hypot(PATH.x[PATH.i] - player.x, PATH.y[PATH.i] - player.y) < 7) { PATH.i++; PATH.lastD = 1e9; }
-    const last = !PATH.n || PATH.i === PATH.n - 1;
-    const wx = PATH.n ? PATH.x[PATH.i] : gx, wy = PATH.n ? PATH.y[PATH.i] : gy;
-    const dx = wx - player.x, dy = wy - player.y, d = Math.hypot(dx, dy);
-    // a walk-to ends on the spot, or when it stalls close to it (a prop in the way)
-    const done = last && (d <= 5 || (d < 16 && PATH.stuck > 0.3));
-    if (!done) {
-      const m = last ? Math.min(1, (d - 4) / 30) : 1;
-      mx = dx / d * m; my = dy / d * m;
-      if (d < PATH.lastD - 0.4) { PATH.lastD = d; PATH.stuck = 0; } else PATH.stuck += dt;
-    } else touch.goal = false;
-    if (touch.goal && ((touch.goalT += dt) > 8 || (!PATH.n && PATH.stuck > 0.6))) touch.goal = false; // no route: give up
-  }
-  const ml = Math.hypot(mx, my);
+  const mv = moveInput(), mx = mv.x, my = mv.y, ml = Math.hypot(mx, my);
   player.moving = ml > 0.1;
-  if (ml > 1) { mx /= ml; my /= ml; }
-  if (mx !== 0 && !aiming()) player.facing = Math.sign(mx); // while shooting, backpedal facing the target
-  player.dashCd = Math.max(0, player.dashCd - dt);
-  if ((keys.Space || keys.ShiftLeft || player.dashBuf > 0) && ml > 0.1) tryDash(mx / Math.max(ml, 0.01), my / Math.max(ml, 0.01));
-  player.dashBuf = Math.max(0, player.dashBuf - dt);
+  if (!usingTouch && mouse.seen) { // the hero always faces the cursor
+    const h = handPos();
+    player.atkAng = Math.atan2(mouse.y + G.cam.y - h.y, mouse.x + G.cam.x - h.x);
+    player.facing = Math.cos(player.atkAng) >= 0 ? 1 : -1;
+  } else if (mx !== 0 && !aiming()) player.facing = Math.sign(mx); // while shooting, backpedal facing the target
+
+  // dash charges refill one at a time; a press with none ready is buffered
+  if (player.dashN < DASH_MAX && (player.dashCd -= dt) <= 0) {
+    player.dashN++;
+    player.dashCd = player.dashN < DASH_MAX ? DASH_CD : 0;
+  }
+  if (player.dashBuf > 0 && (player.dashBuf -= dt) > 0 && player.dashN > 0 && player.dashT <= 0) dashNow();
   if (player.dashT > 0) {
     player.dashT -= dt;
-    player.vx = player.dashX * st.moveSpd * 3.4; player.vy = player.dashY * st.moveSpd * 3.4;
+    // a burst that eases out into a run: 4.8x speed down to 1.4x (~47px)
+    const u = Math.max(0, player.dashT / DASH_T), v = st.moveSpd * (1.4 + 3.4 * u);
+    player.vx = player.dashX * v; player.vy = player.dashY * v;
     if ((player.ghostT -= dt) <= 0) { // afterimages
       player.ghostT = 0.025;
       const e = part(P_AFTER, player.x, player.y + 5, 0, 0, 0.22);
       if (e >= 0) { REF[e] = animFrame(player.moving ? player.runList : player.idleList, player.animT); FLAG[e] = player.facing < 0 ? 1 : 0; }
     }
   } else {
-    const k = 1 - Math.exp(-dt * (ml > 0.1 ? 16 : 11));
-    player.vx += (mx * st.moveSpd - player.vx) * k; player.vy += (my * st.moveSpd - player.vy) * k;
+    // snappy: ~55ms to full speed, ~80ms to a stop
+    const k = 1 - Math.exp(-dt * (ml > 0.1 ? 18 : 12));
+    const tvx = mx * st.moveSpd, tvy = my * st.moveSpd;
+    if (ml > 0.1 && player.vx * tvx + player.vy * tvy < -st.moveSpd * st.moveSpd * 0.3) dust(player.x, player.y + 4, 2, 3); // a hard turn kicks dust
+    player.vx += (tvx - player.vx) * k; player.vy += (tvy - player.vy) * k;
   }
   player.x += player.vx * dt; player.y += player.vy * dt;
   const pc = collideSolids(player.x, player.y, player.r + 2);
@@ -3973,11 +3834,15 @@ function updatePlayer(dt) {
 }
 
 function tryDash(dx, dy) {
-  if (player.dashCd > 0) { player.dashBuf = 0.12; return; } // buffered: fires as soon as it's ready
-  player.dashCd = 1.6; player.dashT = 0.16; player.dashX = dx; player.dashY = dy; player.dashBuf = 0; player.ghostT = 0;
+  if (player.dashN <= 0 || player.dashT > 0) { player.dashBuf = 0.15; return; } // fires as soon as it can
+  if (player.dashN === DASH_MAX) player.dashCd = DASH_CD;
+  player.dashN--;
+  player.dashT = DASH_T; player.dashX = dx; player.dashY = dy; player.dashBuf = 0; player.ghostT = 0;
+  dust(player.x - dx * 4, player.y + 4, 3, 4);
+  G.kickX += dx * 2; G.kickY += dy * 2;
   // a dash that slips past a zombie at point blank is a "close call": combo time back
   const near = nearestEnemy(player, 22);
-  if (near && G.combo > 0) { G.comboT = 3; popText(player.x, player.y - 30, "CLOSE CALL", "#78ffdc"); }
+  if (near && G.combo > 0) { G.comboT = 3; feed("CLOSE CALL", "#78ffdc"); }
   SFX.dash();
   buzz(10);
   learn(LEARN_DASH);
@@ -4003,7 +3868,7 @@ function hurtPlayer(dmg) {
   if (player.hp <= 0) { // WASTED: slow motion, then the end screen
     player.hp = 0;
     G.wasted = 2.2;
-    banner("WASTED", "", "#e4485a", 2.4, true);
+    banner("WASTED", "", "#e4485a", 2.4, true); feedLines.length = 0;
     bankCoins();
     recordBest();
     SFX.bossRoar();
@@ -4048,6 +3913,7 @@ function updatePlay(rawDt) {
 
   sysZombies(dt);
   updateActiveProps(dt);
+  updateCollapses(dt);
   sysParticles(dt);
   sysPickups(dt);
 
@@ -4086,22 +3952,26 @@ function updatePlay(rawDt) {
 }
 
 // ------------------------------------------------------------------ render --
-// camera: eases toward the player plus a lead in the aim/move direction;
-// shake comes from trauma (squared, so small hits stay calm), and each shot
-// kicks the view back a little
+// camera: locked to the hero plus a lead toward the cursor (desktop) or the
+// aim / heading (touch). Only the lead eases, and both parts are whole pixels,
+// so a running hero never jitters against the street. Shake comes from trauma
+// (squared, so small hits stay calm); shots kick the view back a little
+let frameDt = 1 / 60;
 function camera() {
-  const dt = 1 / 60;
-  const lead = aiming() ? 26 : 12;
-  const ax = aiming() ? Math.cos(player.atkAng) : (player.moving ? player.vx / player.stats.moveSpd : 0);
-  const ay = aiming() ? Math.sin(player.atkAng) : (player.moving ? player.vy / player.stats.moveSpd : 0);
-  const tx = player.x + ax * lead - VW / 2, ty = player.y + ay * lead * 0.7 - VH / 2;
-  const k = 1 - Math.exp(-dt * 7);
-  G.camX += (tx - G.camX) * k; G.camY += (ty - G.camY) * k;
-  if (Math.abs(G.camX - tx) > 300 || Math.abs(G.camY - ty) > 300) { G.camX = tx; G.camY = ty; } // teleports/new runs
-  if (INTRO.kind) introCam(tx, ty);
+  let lx, ly;
+  if (!usingTouch && mouse.seen) { lx = clamp((mouse.x - VW / 2) * 0.22, -56, 56); ly = clamp((mouse.y - VH / 2) * 0.22, -36, 36); }
+  else {
+    const lead = aiming() ? 26 : 16;
+    lx = (aiming() ? Math.cos(player.atkAng) : player.moving ? player.vx / player.stats.moveSpd : 0) * lead;
+    ly = (aiming() ? Math.sin(player.atkAng) : player.moving ? player.vy / player.stats.moveSpd : 0) * lead * 0.7;
+  }
+  const k = 1 - Math.exp(-Math.min(frameDt, 0.05) * 5);
+  G.leadX += (lx - G.leadX) * k; G.leadY += (ly - G.leadY) * k;
+  G.camX = Math.round(player.x) + Math.round(G.leadX) - (VW >> 1);
+  G.camY = Math.round(player.y) + Math.round(G.leadY) - (VH >> 1);
   const s = G.trauma * G.trauma * 9, t = G.t * 40;
-  let cx = clamp(G.camX, 0, WORLD_W - VW) + Math.sin(t * 1.3) * s + G.kickX;
-  let cy = clamp(G.camY, 0, WORLD_H - VH) + Math.cos(t * 1.7) * s + G.kickY;
+  const cx = clamp(G.camX, 0, WORLD_W - VW) + Math.sin(t * 1.3) * s + G.kickX;
+  const cy = clamp(G.camY, 0, WORLD_H - VH) + Math.cos(t * 1.7) * s + G.kickY;
   G.cam.x = cx; G.cam.y = cy;
   return { cx, cy };
 }
@@ -4449,7 +4319,7 @@ function renderDarkness(cx, cy) {
 // back broken, and floor chunks are repainted around changes.
 const WORLD = { props: new Map(), tiles: new Map(), cellTiles: new Map() };
 const activeProps = []; // props with running timers: smoke, fuses, fires, geysers
-const TILE_HP = 55;
+const TILE_HP = 30;
 const PS_OK = 0, PS_SMOKE = 1, PS_FUSE = 2, PS_WRECK = 3, PS_GONE = 4, PS_BROKEN = 5;
 
 function propKind(img) {
@@ -4605,23 +4475,27 @@ function blastBuildings(x, y, r, dmg) {
   const ty0 = Math.floor((y - r) / TILE), ty1 = Math.floor((y + r) / TILE);
   for (let ty = ty0; ty <= ty1; ty++) {
     for (let tx = tx0; tx <= tx1; tx++) {
-      if (oob(tx, ty) || tileType(tx, ty) !== T_BLD) continue;
-      const b = buildingAt(tx, ty);
-      if (!b || b === EDGE_BLD) continue; // the city's outer ring holds
       const d = Math.hypot(tx * TILE + 8 - x, ty * TILE + 8 - y);
-      if (d >= r) continue;
-      const key = ty * MAP_W + tx;
-      const was = WORLD.tiles.has(key) ? WORLD.tiles.get(key) : TILE_HP;
-      const hp = was - dmg * 1.4 * (1 - d / r);
-      if (hp <= 0) destroyTile(tx, ty, b);
-      else {
-        WORLD.tiles.set(key, hp);
-        if (was === TILE_HP || Math.random() < 0.4) decal("crack_" + irnd(0, 1), tx * TILE + 8, ty * TILE + 8, 0, 0.9);
-        burst(b.wall === "brick" ? "brick" : b.wall === "beige" ? "beige" : "concrete", tx * TILE + 8, ty * TILE + 14, 2, 80);
-      }
+      if (d < r) damageTile(tx, ty, dmg * 2.5 * (1 - d / r) + 8, true);
     }
   }
 }
+// a wall tile takes a hit: cracks, chips, and at 0 hp it falls into rubble.
+// Bullets chip (blast = false): a few small bits, a crack now and then
+function damageTile(tx, ty, dmg, blast) {
+  if (oob(tx, ty) || tileType(tx, ty) !== T_BLD) return;
+  const b = buildingAt(tx, ty);
+  if (!b || b === EDGE_BLD) return; // the city's outer ring holds
+  const key = ty * MAP_W + tx;
+  const was = WORLD.tiles.has(key) ? WORLD.tiles.get(key) : TILE_HP;
+  const hp = was - dmg;
+  if (hp <= 0) { destroyTile(tx, ty, b); return; }
+  WORLD.tiles.set(key, hp);
+  // a crack the first time, and again when it's half gone
+  if (was === TILE_HP || (was > TILE_HP / 2 && hp <= TILE_HP / 2) || (blast && Math.random() < 0.4)) decal("crack_" + irnd(0, 1), tx * TILE + 8, ty * TILE + 8, 0, 0.9);
+  burst(wallMat(b), tx * TILE + 8, ty * TILE + 14, blast ? 2 : 1, blast ? 80 : 50);
+}
+const wallMat = b => (b.wall === "brick" ? "brick" : b.wall === "beige" ? "beige" : "concrete");
 
 function destroyTile(tx, ty, b) {
   const c = cellAt(tx, ty), i = (ty - c.y0) * c.w + tx - c.x0;
@@ -4634,13 +4508,43 @@ function destroyTile(tx, ty, b) {
   let lst = WORLD.cellTiles.get(ck);
   if (!lst) { lst = []; WORLD.cellTiles.set(ck, lst); }
   lst.push(i);
-  const mat = b.wall === "brick" ? "brick" : b.wall === "beige" ? "beige" : "concrete";
-  burst(mat, tx * TILE + 8, ty * TILE + 8, 9, 160);
-  burst("glass", tx * TILE + 8, ty * TILE + 8, 3, 120);
-  dust(tx * TILE + 8, ty * TILE + 12, 6, 7);
+  const mat = wallMat(b);
+  burst(mat, tx * TILE + 8, ty * TILE + 8, collapsing ? 3 : 9, 160);
+  if (!collapsing) burst("glass", tx * TILE + 8, ty * TILE + 8, 3, 120);
+  dust(tx * TILE + 8, ty * TILE + 12, collapsing ? 2 : 6, 7);
   // repaint the chunks that can see this tile (facades above and below change)
   const S = CHUNK;
   for (let yy = ty - 2; yy <= ty + 1; yy++) for (let xx = tx - 1; xx <= tx + 1; xx++) staleChunk(Math.floor(xx / S), Math.floor(yy / S));
+  // a quarter of it gone (min 3 tiles) and the whole building comes down
+  if (!collapsing && b.bx1 !== undefined) {
+    let lost = 0;
+    const n = (b.bx1 - b.bx0 + 1) * (b.by1 - b.by0 + 1);
+    for (let y = b.by0; y <= b.by1; y++) for (let x = b.bx0; x <= b.bx1; x++) if (WORLD.tiles.get(y * MAP_W + x) === -1) lost++;
+    if (lost >= Math.max(3, n * 0.25)) collapseBuilding(tx, ty, b);
+  }
+}
+// the rest falls row by row from the top, over about half a second
+let collapsing = false;
+const collapses = [];
+function collapseBuilding(tx, ty, b) {
+  for (const k of collapses) if (k.b === b) return;
+  collapses.push({ b, x: tx, y: ty, row: b.by0, t: 0, cx: (b.bx0 + b.bx1 + 1) * 8, cy: (b.by0 + b.by1 + 1) * 8 });
+  G.trauma = Math.min(1, G.trauma + 0.6);
+  fxShock((b.bx0 + b.bx1 + 1) * 8, (b.by0 + b.by1 + 1) * 8, 4);
+  noise(0.8, 0.2, 180); beep(55, 0.6, "sawtooth", 0.1, -25);
+  buzz(60);
+}
+function updateCollapses(dt) {
+  for (let i = collapses.length - 1; i >= 0; i--) {
+    const k = collapses[i], b = k.b;
+    if ((k.t -= dt) > 0) continue;
+    k.t = 0.07;
+    collapsing = true;
+    for (let x = b.bx0; x <= b.bx1; x++) if (tileType(x, k.row) === T_BLD && buildingAt(x, k.row) === b) destroyTile(x, k.row, b);
+    collapsing = false;
+    dust(k.cx + rnd(-20, 20), k.row * TILE + 12, 6, 9);
+    if (++k.row > b.by1) collapses.splice(i, 1);
+  }
 }
 
 // what is at a world point: 0 nothing, 1 a building, or the live prop rect
@@ -4806,8 +4710,7 @@ function panel(x, y, w, h, edge = "#3a3346") {
 }
 
 function renderHUD() {
-  if (introLocked()) { renderBanners(); renderLetterbox(); return; } // cinematic: no HUD yet
-  renderRoute();
+  if (introLocked()) { renderBanners(); return; } // dropping in: no HUD yet
   renderHints();
   const st = player.stats, t = G.t, w = WEAPONS[G.weapon];
   // --- top-left: the gun, its ammo, health
@@ -4842,8 +4745,11 @@ function renderHUD() {
   // xp + dash
   bar(hx, 40, 68, 3, player.xp / xpNeeded(player.level), "#7bd88f", "#16201a");
   ftx("LV" + player.level, hx + 72, 44, 8, "#7bd88f");
-  const dashP = 1 - player.dashCd / 1.6;
-  ctx.fillStyle = dashP >= 1 ? "#78ffdc" : "#2a4a48"; ctx.fillRect(hx + 96, 40, Math.round(8 * clamp(dashP, 0, 1)), 3);
+  for (let i = 0; i < DASH_MAX; i++) { // dash charges; the one recharging fills up
+    const f = i < player.dashN ? 1 : i === player.dashN ? 1 - player.dashCd / DASH_CD : 0;
+    ctx.fillStyle = "#2a4a48"; ctx.fillRect(hx + 95 + i * 5, 40, 4, 3);
+    ctx.fillStyle = "#78ffdc"; ctx.fillRect(hx + 95 + i * 5, 40, Math.round(4 * clamp(f, 0, 1)), 3);
+  }
 
   // --- top-right: the money counter, multiplier, threat stars
   G.scoreShown += (G.score - G.scoreShown) * 0.2;
@@ -4874,14 +4780,17 @@ function renderHUD() {
   ftx("WAVE " + G.wave, VW / 2, 13, 9, boss ? "#ff6b6b" : "#ffd166", "center");
   ftx(`${ZOMBIES.n + spawnQueue.length} LEFT`, VW / 2, 22, 8, "#8f84a8", "center");
 
-  // crosshair: hollow while auto-aiming, filled red while you hold fire
+  // crosshair: four outlined arms around the cursor, red while you fire
   if (mouse.seen && !usingTouch) {
-    const mx = Math.round(mouse.x), my = Math.round(mouse.y), c = mouse.down ? "#ff3a3a" : "#e8dfc8", g = mouse.down ? 2 : 3;
-    ctx.fillStyle = "#140f18";
-    ctx.fillRect(mx - 6, my - 1, 4, 3); ctx.fillRect(mx + 3, my - 1, 4, 3); ctx.fillRect(mx - 1, my - 6, 3, 4); ctx.fillRect(mx - 1, my + 3, 3, 4);
+    const mx = Math.round(mouse.x), my = Math.round(mouse.y), c = mouse.down ? "#ff3a3a" : "#f4f0f8", g = mouse.down ? 2 : 3, L = 5;
+    ctx.fillStyle = "#0b0910";
+    ctx.fillRect(mx - g - L - 1, my - 1, L + 2, 3); ctx.fillRect(mx + g, my - 1, L + 2, 3);
+    ctx.fillRect(mx - 1, my - g - L - 1, 3, L + 2); ctx.fillRect(mx - 1, my + g, 3, L + 2);
+    ctx.fillRect(mx - 1, my - 1, 3, 3);
     ctx.fillStyle = c;
-    ctx.fillRect(mx - 5 - g + 3, my, 3, 1); ctx.fillRect(mx + g + 1, my, 3, 1); ctx.fillRect(mx, my - 5 - g + 3, 1, 3); ctx.fillRect(mx, my + g + 1, 1, 3);
-    if (mouse.down) ctx.fillRect(mx, my, 1, 1);
+    ctx.fillRect(mx - g - L, my, L, 1); ctx.fillRect(mx + g + 1, my, L, 1);
+    ctx.fillRect(mx, my - g - L, 1, L); ctx.fillRect(mx, my + g + 1, 1, L);
+    ctx.fillRect(mx, my, 1, 1);
   }
   renderPager();
   renderKingArrow();
@@ -4893,105 +4802,49 @@ function renderHUD() {
   else invRects = [];
 
   renderTouchMarks();
-  renderLetterbox();
 }
 
-// walk-to marker and GPS-style dotted route; drawn before the HUD so the
-// radar and panels sit on top of them
-function renderRoute() {
-  if (!usingTouch) return;
-  const ox = G.cam.x, oy = G.cam.y, t = G.t;
-  if (touch.goal) {
-    const x = Math.round(touch.gx - ox), y = Math.round(touch.gy - oy), k = Math.floor(t * 8) % 4;
-    ctx.fillStyle = "rgba(120,255,220,0.8)";
-    ctx.fillRect(x - 5 - k, y, 3, 1); ctx.fillRect(x + 3 + k, y, 3, 1);
-    ctx.fillRect(x, y - 4 - k, 1, 3); ctx.fillRect(x, y + 2 + k, 1, 3);
-  }
-  if (!(touch.goal || touch.id !== -1) || PATH.n < 2) return;
-  ctx.fillStyle = "rgba(120,255,220,0.85)";
-  let ax = player.x, ay = player.y, phase = (t * 24) % 6;
-  for (let i = PATH.i; i < PATH.n; i++) {
-    const bx = PATH.x[i], by = PATH.y[i], d = Math.hypot(bx - ax, by - ay);
-    for (let s = phase; s < d; s += 6) ctx.fillRect(Math.round(ax + (bx - ax) * s / d - ox), Math.round(ay + (by - ay) * s / d - oy), 1, 1);
-    phase = (phase - d % 6 + 6) % 6; ax = bx; ay = by;
-  }
-}
-// touch feedback in the world, no on-screen sticks: focus brackets on the
-// locked target, a marker where you tapped, a ring under the held finger,
-// and a dash-ready arc at the hero's feet
+// touch: the run stick (faint at rest, bright while held) and a dash-ready
+// ring at the hero's feet that fills while a charge comes back
 function renderTouchMarks() {
-  const ox = G.cam.x, oy = G.cam.y, t = G.t;
-  if (focusTarget(1e9)) {
-    const x = Math.round(FOCUS_V.x - ox), y = Math.round(FOCUS_V.y - oy - 6);
-    const r = 9 + Math.round(Math.sin(t * 10) * 1.5), L = 4;
-    ctx.fillStyle = "#ff3a3a";
-    for (const [sx, sy] of CORNERS) {
-      ctx.fillRect(x + sx * r - (sx > 0 ? L - 1 : 0), y + sy * r, L, 1);
-      ctx.fillRect(x + sx * r, y + sy * r - (sy > 0 ? L - 1 : 0), 1, L);
-    }
-  }
   if (!usingTouch) return;
-  if (touch.id !== -1) {
-    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(Math.round(touch.x) + 0.5, Math.round(touch.y) + 0.5, 7, 0, Math.PI * 2); ctx.stroke();
-  }
-  // dash: a thin arc around the feet fills while recharging, flashes when ready
+  const held = stick.id !== -1, h = stickHome();
+  const bx = Math.round(held ? stick.bx : h.x) + 0.5, by = Math.round(held ? stick.by : h.y) + 0.5;
+  ctx.globalAlpha = held ? 0.55 : 0.28;
+  ctx.fillStyle = "#0b0910"; ctx.beginPath(); ctx.arc(bx, by, STICK_R + 2, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "#e8dfc8"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(bx, by, STICK_R, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = held ? 0.85 : 0.4;
+  ctx.fillStyle = "#e8dfc8"; ctx.beginPath();
+  ctx.arc(Math.round(bx + stick.vx * STICK_R * 0.8), Math.round(by + stick.vy * STICK_R * 0.8), 8, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  const ox = G.cam.x, oy = G.cam.y;
   const px = Math.round(player.x - ox) + 0.5, py = Math.round(player.y - oy) + 4.5;
-  const p = 1 - player.dashCd / 1.6;
   ctx.lineWidth = 1;
-  if (p < 1) {
-    ctx.strokeStyle = "rgba(120,255,220,0.45)";
+  if (player.dashN < DASH_MAX) {
+    const p = 1 - player.dashCd / DASH_CD;
+    ctx.strokeStyle = player.dashN > 0 ? "rgba(120,255,220,0.7)" : "rgba(120,255,220,0.35)";
     ctx.beginPath(); ctx.ellipse(px, py, 9, 4, 0, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2); ctx.stroke();
-  } else if (player.dashCdWas > 0) {
-    ctx.strokeStyle = "#78ffdc";
-    ctx.beginPath(); ctx.ellipse(px, py, 10, 5, 0, 0, Math.PI * 2); ctx.stroke();
   }
-  player.dashCdWas = p < 1 ? 0.25 : Math.max(0, player.dashCdWas - 1 / 60);
 }
 const CORNERS = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
 
 // ---------------------------------------------------------------- intro ---
-// Run start, GTA mission style: a look at the King, a whip-pan across the
-// city to the hero, who drops in with a slam. Any input skips to the landing,
-// and once all control hints are learned the whole thing runs faster.
-// Wave 2+: a quick whip from where the dead will come. Letterbox bars frame both.
-const INTRO = { kind: 0, t: 0, king: 0, pan: 0, land: 0, end: 0, landed: true, fx: 0, fy: 0 };
-const DROP_T = 0.25, BARS_OUT = 0.35, WAVE_WHIP = 0.55;
-let introRuns = 0; // the full version plays once per session; retries get the short one
-function startIntro(kind) {
-  INTRO.kind = kind; INTRO.t = 0;
-  if (kind === 1) {
-    const fast = introRuns++ > 0 || (learned.desk & LEARN_ALL) === LEARN_ALL || (learned.touch & LEARN_ALL) === LEARN_ALL;
-    INTRO.king = kingPos ? (fast ? 0.25 : 0.7) : 0;
-    INTRO.pan = INTRO.king + (kingPos ? (fast ? 0.45 : 0.65) : 0.2);
-    INTRO.land = INTRO.pan + (fast ? 0.2 : DROP_T);
-    INTRO.end = INTRO.land + BARS_OUT;
-    INTRO.landed = false;
-    player.dropZ = 400;
-    for (const b of banners) { b.y = 72; b.dur = Math.min(b.dur, INTRO.land + 0.25); } // title card clears the drop zone
-  } else {
-    // from the nearest manhole or door the next wave will use
-    let best = null, bd = 1e9;
-    for (const c of cellsIn(player.x - 300, player.y - 300, player.x + 300, player.y + 300, scratchCells)) {
-      for (const s of c.spawns) { const d = dist(s, player); if (d > 120 && d < bd) { bd = d; best = s; } }
-    }
-    if (!best) { INTRO.kind = 0; return; }
-    INTRO.fx = (best.x + player.x) / 2 - VW / 2; INTRO.fy = (best.y + player.y) / 2 - VH / 2;
-    INTRO.end = WAVE_WHIP; INTRO.landed = true; player.dropZ = 0;
-  }
+// Run start: the hero drops in with a slam. Short, and any input lands him.
+const INTRO = { kind: 0, t: 0, landed: true };
+const DROP_T = 0.35;
+function startIntro() {
+  INTRO.kind = 1; INTRO.t = 0; INTRO.landed = false;
+  player.dropZ = 160;
 }
 const introLocked = () => INTRO.kind === 1 && !INTRO.landed;
 function updateIntro(dt) {
   INTRO.t += dt;
-  if (INTRO.kind === 1 && !INTRO.landed) {
-    const p = clamp((INTRO.t - INTRO.pan) / (INTRO.land - INTRO.pan), 0, 1);
-    player.dropZ = INTRO.t < INTRO.pan ? 400 : 160 * (1 - p) * (1 - p);
-    if (INTRO.t >= INTRO.land) heroLands();
-  }
-  if (INTRO.t >= INTRO.end) INTRO.kind = 0;
+  const p = clamp(INTRO.t / DROP_T, 0, 1);
+  player.dropZ = 160 * (1 - p) * (1 - p);
+  if (INTRO.t >= DROP_T) heroLands();
 }
 function heroLands() {
-  INTRO.landed = true; INTRO.t = Math.max(INTRO.t, INTRO.land);
+  INTRO.landed = true; INTRO.kind = 0;
   player.dropZ = 0;
   G.trauma = Math.min(1, G.trauma + 0.55);
   fxShock(player.x, player.y, 3);
@@ -5000,209 +4853,60 @@ function heroLands() {
   noise(0.35, 0.12, 300); beep(70, 0.3, "sawtooth", 0.09, -40);
   buzz(30);
 }
-// any key / tap during the cinematic: straight to the landing
+// any key / tap during the drop: straight to the landing
 function skipIntro() {
   if (!introLocked()) return false;
   heroLands();
   return true;
 }
-const easeIO = p => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
-// camera override (top-left corner); tx/ty = where the normal camera wants to be
-function introCam(tx, ty) {
-  const t = INTRO.t;
-  if (INTRO.kind === 1 && kingPos && t < INTRO.pan) {
-    const kx = kingPos.x - VW / 2, ky = kingPos.y - VH / 2 - 10 - Math.min(t, INTRO.king) * 10;
-    const p = t < INTRO.king ? 0 : easeIO((t - INTRO.king) / (INTRO.pan - INTRO.king));
-    G.camX = kx + (tx - kx) * p; G.camY = ky + (ty - ky) * p;
-  } else if (INTRO.kind === 2) {
-    const p = 1 - Math.pow(1 - Math.min(1, t / WAVE_WHIP), 3);
-    G.camX = INTRO.fx + (tx - INTRO.fx) * p; G.camY = INTRO.fy + (ty - INTRO.fy) * p;
-  }
-}
-// cinematic bars: in while the intro runs, sliding out after the landing
-function renderLetterbox() {
-  if (!INTRO.kind) return;
-  let h;
-  if (INTRO.kind === 1) h = INTRO.landed ? 24 * (1 - clamp((INTRO.t - INTRO.land) / BARS_OUT, 0, 1)) : 24;
-  else h = 12 * Math.sin(Math.PI * Math.min(1, INTRO.t / WAVE_WHIP));
-  h = Math.round(h);
-  if (h <= 0) return;
-  ctx.fillStyle = "#050308";
-  ctx.fillRect(0, 0, VW, h); ctx.fillRect(0, VH - h, VW, h);
-}
 
 // ------------------------------------------------------- control hints ---
-// No labels: one animated pixel prompt at a time next to the hero — keys,
-// a mouse, or a ghost hand on touch. Doing the action pops it with a tick and
-// it is remembered per input type, so returning players never see them.
+// One plain line at the bottom while a run starts: what each control does.
+// Each part turns green once used; the line leaves when all are learned
+// (remembered per input type) or after 10s.
 const LEARN_MOVE = 1, LEARN_AIM = 2, LEARN_DASH = 4, LEARN_ALL = 7;
 const learned = { desk: 0, touch: 0 };
 try { Object.assign(learned, JSON.parse(localStorage.getItem("orcslasher_learned") || "{}")); } catch (e) { /* no storage */ }
-const hint = { cur: 0, shown: 0, popT: 0, popX: 0, popY: 0, moveT: 0 };
+// one record per input mode (a hybrid device can switch mid-run): seconds
+// shown, seconds moved, seconds since all were learned, what was learned
+// when the run began
+const hint = { desk: { t: 0, moveT: 0, doneT: 0, start: 0 }, touch: { t: 0, moveT: 0, doneT: 0, start: 0 } };
 function learn(bit) {
   const k = usingTouch ? "touch" : "desk";
   if (learned[k] & bit) return;
   learned[k] |= bit;
   try { localStorage.setItem("orcslasher_learned", JSON.stringify(learned)); } catch (e) { /* no storage */ }
-  if (hint.cur === bit) { hint.popT = 0.45; SFX.card(); buzz(12); }
 }
-function pixelSprite(rows, pal) {
-  const c = document.createElement("canvas");
-  c.width = rows[0].length; c.height = rows.length;
-  const g = c.getContext("2d");
-  for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) {
-    const col = pal[rows[y][x]];
-    if (col) { g.fillStyle = col; g.fillRect(x, y, 1, 1); }
-  }
-  return c;
-}
-const HAND = pixelSprite([ // fingertip at (3, 0)
-  "...##......",
-  "..#ww#.....",
-  "..#ww#.....",
-  "..#ww###...",
-  "..#ww#ww##.",
-  "..#ww#ww#w#",
-  "###wwwwwww#",
-  "#w#wwwwwww#",
-  "#wwwwwwwww#",
-  ".#wwwwwwww#",
-  ".#wwwwwww#.",
-  "..#wwwwww#.",
-  "...######..",
-], { "#": "#140f18", w: "#f2ead8" });
-const MOUSE_ROWS = [
-  "....#....",
-  "....#....",
-  ".#######.",
-  "#bbb#www#",
-  "#bbb#www#",
-  "#bbb#www#",
-  "#########",
-  "#wwwwwww#",
-  "#wwwwwww#",
-  "#wwwwwww#",
-  "#wwwwwww#",
-  ".#wwwww#.",
-  "..#####..",
-];
-const MOUSE_UP = pixelSprite(MOUSE_ROWS, { "#": "#140f18", w: "#cfc6de", b: "#cfc6de" });
-const MOUSE_DN = pixelSprite(MOUSE_ROWS, { "#": "#140f18", w: "#cfc6de", b: "#ff3a3a" });
-
 function updateHints(dt) {
-  if (G.state !== "play" || introLocked() || G.paused || G.wasted) { hint.cur = 0; return; }
-  if (player.moving && player.dashT <= 0 && (hint.moveT += dt) > 0.35) learn(LEARN_MOVE);
-  const set = learned[usingTouch ? "touch" : "desk"];
-  const next = !(set & LEARN_MOVE) ? LEARN_MOVE : !(set & LEARN_AIM) ? LEARN_AIM : !(set & LEARN_DASH) ? LEARN_DASH : 0;
-  if (next !== hint.cur) { hint.cur = next; hint.shown = 0; }
-  hint.shown += dt;
-  if (hint.popT > 0) hint.popT -= dt;
+  if (G.state !== "play" || introLocked() || G.paused || G.wasted) return;
+  const mode = usingTouch ? "touch" : "desk", h = hint[mode];
+  if (player.moving && player.dashT <= 0 && (h.moveT += dt) > 0.35) learn(LEARN_MOVE);
+  if (usingTouch) learn(LEARN_AIM); // the gun aims itself
+  h.t += dt;
+  if ((learned[mode] & LEARN_ALL) === LEARN_ALL) h.doneT += dt;
 }
-
-function keycap(x, y, w, ch, down) {
-  ctx.fillStyle = "#140f18"; ctx.fillRect(x - 1, y - 1, w + 2, 11);
-  ctx.fillStyle = down ? "#8a6a30" : "#3a3346"; ctx.fillRect(x, y + (down ? 1 : 0), w, 9);
-  ctx.fillStyle = down ? "#ffd166" : "#6f6485"; ctx.fillRect(x, y + (down ? 1 : 0), w, 1);
-  if (ch) ftx(ch, x + w / 2 + 1, y + 8 + (down ? 1 : 0), 8, down ? "#ffffff" : "#cfc6de", "center");
-}
-function bubble(cx, cy, w, h, px, py) {
-  const x = Math.round(cx - w / 2), y = Math.round(cy - h / 2);
-  ctx.fillStyle = "rgba(10,8,16,0.82)"; ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = "#5a5070"; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  // tail toward the hero
-  const tx = Math.round(clamp(px, x + 4, x + w - 4)), below = py > y + h;
-  ctx.fillStyle = "rgba(10,8,16,0.82)";
-  for (let i = 0; i < 4; i++) ctx.fillRect(tx - 3 + i, below ? y + h + i : y - 1 - i, 7 - i * 2, 1);
-}
+const HINTS_DESK = [[LEARN_MOVE, "WASD MOVE"], [LEARN_AIM, "MOUSE AIM + CLICK SHOOT"], [LEARN_DASH, "SPACE DASH"]];
+const HINTS_TOUCH = [[LEARN_MOVE, "STICK RUN"], [LEARN_DASH, "TAP DASH"]];
 function renderHints() {
-  if (G.paused || G.wasted) return;
-  const ox = G.cam.x, oy = G.cam.y, t = G.t;
-  const px = Math.round(player.x - ox), py = Math.round(player.y - oy);
-  const above = py - 48 > 54, cx = px, cy = above ? py - 44 : py + 30;
-  if (hint.popT > 0) { // learned: a ring and a tick where the prompt was
-    const k = 1 - hint.popT / 0.45;
-    ctx.strokeStyle = `rgba(123,216,143,${1 - k})`; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(cx + 0.5, cy + 0.5, 6 + k * 18, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = "#7bd88f";
-    const tx = cx - 3, ty = cy - 1 - Math.round(k * 6);
-    ctx.fillRect(tx, ty + 2, 1, 1); ctx.fillRect(tx + 1, ty + 3, 1, 1); ctx.fillRect(tx + 2, ty + 4, 1, 1);
-    ctx.fillRect(tx + 3, ty + 3, 1, 1); ctx.fillRect(tx + 4, ty + 2, 1, 1); ctx.fillRect(tx + 5, ty + 1, 1, 1); ctx.fillRect(tx + 6, ty, 1, 1);
-  }
-  if (!hint.cur || hint.shown < 0.3) return;
-  const s = Math.min(1, (hint.shown - 0.3) / 0.12); // pops in
-  ctx.save();
-  ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-cx, -cy);
-  if (!usingTouch) {
-    if (hint.cur === LEARN_MOVE) {
-      bubble(cx, cy, 46, 30, px, py);
-      const k = Math.floor(t / 0.3) % 4; // W D S A: round and round
-      keycap(cx - 5, cy - 12, 11, "W", k === 0);
-      keycap(cx - 18, cy + 1, 11, "A", k === 3);
-      keycap(cx - 5, cy + 1, 11, "S", k === 2);
-      keycap(cx + 8, cy + 1, 11, "D", k === 1);
-    } else if (hint.cur === LEARN_AIM) {
-      bubble(cx, cy, 40, 26, px, py);
-      const ph = (t % 0.9) / 0.9, down = ph > 0.35 && ph < 0.6;
-      ctx.drawImage(down ? MOUSE_DN : MOUSE_UP, cx - 15, cy - 7);
-      const hx = cx + 9, hy = cy;
-      ctx.fillStyle = down ? "#ff3a3a" : "#e8dfc8";
-      ctx.fillRect(hx - 5, hy, 3, 1); ctx.fillRect(hx + 3, hy, 3, 1); ctx.fillRect(hx, hy - 5, 1, 3); ctx.fillRect(hx, hy + 3, 1, 3);
-      if (down) { ctx.fillStyle = "#ffd166"; ctx.fillRect(hx - 1, hy - 1, 3, 3); ctx.fillStyle = "#ff8a2a"; ctx.fillRect(hx - 3, hy - 3, 1, 1); ctx.fillRect(hx + 3, hy - 2, 1, 1); ctx.fillRect(hx + 2, hy + 3, 1, 1); }
-    } else {
-      bubble(cx, cy, 52, 20, px, py);
-      const ph = (t % 1) / 1, down = ph > 0.2 && ph < 0.45;
-      keycap(cx - 22, cy - 4, 26, "", down);
-      if (ph > 0.2 && ph < 0.75) streak(cx + 8, cy, (ph - 0.2) / 0.55);
-    }
-  } else {
-    const ph = (t % 1.4) / 1.4;
-    if (hint.cur === LEARN_MOVE) { // press, hold and slide: the hero follows
-      bubble(cx, cy, 44, 28, px, py);
-      const press = ph > 0.12 && ph < 0.8, slide = clamp((ph - 0.25) / 0.5, 0, 1);
-      const fx = cx - 12 + Math.round(easeIO(slide) * 22), fy = cy - 4;
-      if (press) {
-        ctx.fillStyle = "rgba(120,255,220,0.6)";
-        for (let x = cx - 12; x < fx; x += 3) ctx.fillRect(x, fy, 1, 1);
-        ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.beginPath(); ctx.arc(fx + 0.5, fy + 0.5, 4, 0, Math.PI * 2); ctx.stroke();
-      }
-      ctx.drawImage(HAND, fx - 3, fy + (press ? 0 : -3));
-    } else if (hint.cur === LEARN_AIM) { // tap a zombie: the hand does it on a real one when it can
-      let z = null, bd = 1e9;
-      for (let i = 0; i < ZOMBIES.n; i++) {
-        const c = ZO[ZOMBIES.dense[i]], zx = c.x - ox, zy = c.y - oy;
-        if (c.dead || c.warmup > 0 || zx < 20 || zx > VW - 20 || zy < 60 || zy > VH - 20) continue;
-        const d = Math.hypot(zx - px, zy - py);
-        if (d < bd) { bd = d; z = c; }
-      }
-      const tap = ph > 0.35 && ph < 0.55;
-      let fx, fy;
-      if (z) { fx = Math.round(z.x - ox); fy = Math.round(z.y - oy - 8); }
-      else { bubble(cx, cy, 30, 28, px, py); fx = cx; fy = cy - 4; drawSprite("skull", cx, cy + 2); }
-      if (tap || (ph >= 0.55 && ph < 0.9)) { // brackets snap on
-        const r = 8;
-        ctx.fillStyle = "#ff3a3a";
-        for (const [sx, sy] of CORNERS) { ctx.fillRect(fx + sx * r - (sx > 0 ? 2 : 0), fy + sy * r, 3, 1); ctx.fillRect(fx + sx * r, fy + sy * r - (sy > 0 ? 2 : 0), 1, 3); }
-      }
-      if (tap) { ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.beginPath(); ctx.arc(fx + 0.5, fy + 0.5, 3 + (ph - 0.35) * 30, 0, Math.PI * 2); ctx.stroke(); }
-      ctx.drawImage(HAND, fx - 3, fy + (tap ? 0 : -4));
-    } else { // flick
-      bubble(cx, cy, 44, 26, px, py);
-      const fl = clamp((ph - 0.3) / 0.12, 0, 1), fx = cx - 12 + Math.round(fl * 20), fy = cy - 4;
-      if (ph > 0.3 && ph < 0.75) streak(cx - 10, cy + 4, clamp((ph - 0.3) / 0.45, 0, 1));
-      ctx.drawImage(HAND, fx - 3, fy + (ph > 0.25 && ph < 0.42 ? 0 : -3));
-    }
-  }
-  ctx.restore();
-}
-// dash afterimages: three chevrons flying right
-function streak(x, y, p) {
-  for (let i = 0; i < 3; i++) {
-    const a = Math.max(0, 1 - p - i * 0.2);
-    if (a <= 0) continue;
-    ctx.fillStyle = `rgba(120,255,220,${a})`;
-    const sx = Math.round(x + p * 14 + i * 5);
-    ctx.fillRect(sx, y - 2, 1, 1); ctx.fillRect(sx + 1, y - 1, 1, 1); ctx.fillRect(sx + 2, y, 1, 1); ctx.fillRect(sx + 1, y + 1, 1, 1); ctx.fillRect(sx, y + 2, 1, 1);
-  }
+  const h = hint[usingTouch ? "touch" : "desk"];
+  if (G.paused || G.wasted || h.start === LEARN_ALL) return;
+  const a = Math.min(1, h.t * 4) * Math.max(0, Math.min(1, 10 - h.t, 1 - (h.doneT - 0.8) * 3));
+  if (a <= 0) return;
+  const set = learned[usingTouch ? "touch" : "desk"], items = usingTouch ? HINTS_TOUCH : HINTS_DESK;
+  let w = 0;
+  for (const [, s] of items) w += fmeasure(s, 8) + 14;
+  w -= 14;
+  let x = Math.round(VW / 2 - w / 2);
+  const y = VH - (usingTouch ? 10 : 12);
+  ctx.globalAlpha = a * 0.75;
+  ctx.fillStyle = "#0b0910"; ctx.fillRect(x - 6, y - 10, w + 12, 13);
+  ctx.globalAlpha = a;
+  items.forEach(([bit, s], i) => {
+    ftx(s, x, y, 8, set & bit ? "#7bd88f" : "#e8dfc8");
+    x += fmeasure(s, 8) + 14;
+    if (i < items.length - 1) ftx("·", x - 8, y, 8, "#5a5070");
+  });
+  ctx.globalAlpha = 1;
 }
 
 // GTA-style pager: a green LCD that types the hero's thoughts
@@ -5210,8 +4914,8 @@ function renderPager() {
   const pg = G.pager;
   if (!pg.cur) return;
   const slide = Math.min(1, pg.t * 6), out = Math.max(0, pg.t - (pg.cur.length * 0.035 + 2.6)) * 4;
-  // below the HUD panels; fades instead of sliding so it never crosses them
-  const y = 52;
+  // bottom centre, clear of the action and above the control hints
+  const y = VH - 44;
   ctx.globalAlpha = slide * (1 - Math.min(1, out));
   if (ctx.globalAlpha <= 0) { ctx.globalAlpha = 1; return; }
   const w = Math.min(300, Math.max(140, fchars(pg.cur).length * 6 + 26)), x = Math.round(VW / 2 - w / 2);
@@ -5247,17 +4951,25 @@ function renderKingArrow() {
   ctx.restore();
 }
 
-// centre messages punch in big and settle: integer pixel scales only
+// headlines pop in at 3x and settle at 2x; WASTED punches in at the centre
 function renderBanners() {
   for (const b of banners) {
     const p = b.t / b.dur;
-    const sc = b.t < 0.06 ? 6 : b.t < 0.12 ? 5 : 4;
-    const alpha = p > 0.8 ? (1 - p) / 0.2 : 1;
-    ctx.globalAlpha = alpha;
-    const size = b.punch ? sc * 7 : 14;
-    const y = b.y + (b.punch ? Math.sin(Math.min(1, b.t * 8) * Math.PI) * -4 : 0);
-    ftx(b.s, VW / 2, y, size, b.col, "center", true);
-    if (b.sub) ftx(b.sub, VW / 2, y + 14, 9, "#e8dfc8", "center");
+    ctx.globalAlpha = p > 0.8 ? (1 - p) / 0.2 : 1;
+    if (b.center) {
+      const sc = b.t < 0.06 ? 6 : b.t < 0.12 ? 5 : 4;
+      ftx(b.s, VW / 2, VH / 2 - 20 + Math.sin(Math.min(1, b.t * 8) * Math.PI) * -4, sc * 7, b.col, "center", true);
+    } else {
+      ftx(b.s, VW / 2, 42, b.t < 0.08 ? 21 : 14, b.col, "center", true);
+      if (b.sub) ftx(b.sub, VW / 2, 52, 8, "#e8dfc8", "center");
+    }
+    ctx.globalAlpha = 1;
+  }
+  let y = 88;
+  for (const l of feedLines) {
+    ctx.globalAlpha = Math.min(1, (1.6 - l.t) * 4);
+    ftx(l.s, VW - 6, y, l.t < 0.06 ? 14 : 8, l.col, "right");
+    y += 10;
     ctx.globalAlpha = 1;
   }
 }
@@ -5268,7 +4980,7 @@ function renderWorldTexts() {
   for (let i = 0; i < TEXTS.n; i++) {
     const e = TEXTS.dense[i], t = TXO[e];
     const age = MAXL[e] - LIFE[e];
-    const size = t.big ? (age < 0.07 ? 21 : 14) : (age < 0.05 ? 14 : 8);
+    const size = t.big && age < 0.07 ? 14 : 8; // big ones punch in, then all read small
     ctx.globalAlpha = Math.min(1, LIFE[e] * 4);
     ftx(t.s, Math.round(PX[e]) - ox, Math.round(PY[e]) - oy, size, t.col, "center");
   }
@@ -6657,6 +6369,9 @@ function handleKey(code) {
     if (code === "Enter") { G.coins += WAVE_BOUNTY; bankCoins(); cardCounts = {}; G.state = "cls"; } // no campfire on this path: pay wave 10 here
   } else if (G.state === "play") {
     if (code === "KeyP" || code === "Escape") G.paused = !G.paused;
+    if (code === "KeyR" && !G.paused && player.reloadT <= 0 && player.ammo < clipSize()) { // reload early
+      player.reloadT = WEAPONS[G.weapon].reload * player.stats.reloadMul; sample("clip", 0.5);
+    }
     if (code === "KeyF" && G.paused) toggleFullscreen();
     if (DEV.on && G.cls === "armorer" && (code === "KeyQ" || code === "KeyE")) {
       const ids = Object.keys(WEAPONS);
@@ -6788,7 +6503,7 @@ let last = performance.now();
 let lastCursor = "";
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+  last = now; frameDt = dt;
   mapStamp++;
   ctx = sceneCtx;
   sceneCtx.imageSmoothingEnabled = uiCtx.imageSmoothingEnabled = false;

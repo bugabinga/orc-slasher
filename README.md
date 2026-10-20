@@ -18,29 +18,27 @@ offline, on desktop and phone.
 **Desktop**
 
 - **Move:** WASD / arrow keys
-- **Shoot:** automatic — your hero aims at the nearest zombie, empties the
-  clip, reloads. Or **hold the mouse** to aim and fire yourself (it snaps
-  onto a zombie right under the crosshair)
-- **Dash:** Space / Shift — a burst of speed with invincibility frames,
-  1.6s cooldown. Dash past a zombie for a **CLOSE CALL**
+- **Aim:** the mouse — your hero always faces the crosshair
+- **Shoot:** click / hold the left mouse button. **R** reloads early
+- **Dash:** Space / Shift / right mouse button — a burst of speed with
+  invincibility frames. Two charges, each back after 1.1s; standing still,
+  you dash toward the crosshair. Dash past a zombie for a **CLOSE CALL**
 - **Menus:** click things, or press the number keys
 - **Pause:** P / Esc, or the ⏸ button top-right in combat
 - **Fullscreen:** the ⛶ button in the menu corner (or press F)
 
 **Phone** (landscape; the first tap goes fullscreen; pixels stay crisp and
-text is drawn bigger on small screens) — no virtual sticks:
+text is drawn bigger on small screens):
 
-- **Hold** anywhere: your hero runs toward your finger
-- **Tap** the street: walk there — your hero finds the way around buildings
-  and wrecks (dotted route) · **tap a zombie, car or barrel**: lock
-  your fire onto it (red brackets) — shoot that car next to the horde
-- **Flick**: dash that way · **a second finger**: dash right now. The ring
-  at your feet fills while the dash recharges
-- Shooting stays automatic; hits and explosions buzz (Android)
+- **Run:** drag the stick in the lower right (put your thumb anywhere in
+  that corner and it centres there)
+- **Dash:** tap anywhere else — or with a second finger while you run. The
+  ring at your feet fills while a charge comes back
+- Your gun aims and fires by itself; hits and explosions buzz (Android)
 
-Every run opens with a short cinematic (tap or press anything to skip),
-and the first time you play, little animated prompts next to your hero show
-each move — do it once and it's ticked off for good.
+Your hero drops in at the start of a run (any input lands him at once). The
+first time you play, one line at the bottom names the controls; each part
+turns green once you've used it.
 
 **Score:** every kill pays `$`. Chain kills within 3 seconds for a combo —
 every 6 kills raises the multiplier (up to ×10), gibs pay ×1.5 and kills
@@ -100,8 +98,10 @@ On the weapon screen, banked gold buys **permanent gun upgrades**
 
 **Everything breaks.** Shoot a car and it smokes, catches fire, then blows
 up — taking the zombies (and the car next to it) with it. Barrels, lamps,
-signs, hydrants, benches and trees all go down; rockets punch holes in
-buildings and leave rubble you can walk through. The damage stays for the
+signs, hydrants, benches and trees all go down; bullets chip
+building walls, rockets and car blasts punch holes in them, and once a
+quarter of a building is gone the rest comes down — leaving rubble you can
+walk through. The damage stays for the
 whole run.
 
 Kill Patient Zero and endless mode opens. How deep can you go?

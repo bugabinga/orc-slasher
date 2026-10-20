@@ -86,24 +86,32 @@ src/game.js` before building.
   logged in `chunkDecals` (ring, `DECAL_CAP`) so repaints replay them
 - **Destruction** — props have hp/state (`PS_OK SMOKE FUSE WRECK GONE
   BROKEN`): `damageProp` → `destroyProp`/`blowProp` (cars smoke, burn, then
-  explode and chain). Building tiles break into `T_RUBBLE` via
-  `blastBuildings`/`destroyTile`. All of it persists in `WORLD`
+  explode and chain). Building tiles (`TILE_HP`) take `damageTile` from
+  blasts (`blastBuildings`) and bullets (chips) and break into `T_RUBBLE`
+  via `destroyTile`; once 25% of a building (`b.bx0..by1`) is gone,
+  `collapseBuilding` queues the rest to fall row by row (`updateCollapses`).
+  All of it persists in `WORLD`
   (`props`/`tiles`/`cellTiles`), which `genCell` re-applies, so evicted
   cells come back broken. Timed props live in `activeProps`
-- **Feel / score** — smoothed player velocity, dash (buffered, i-frames,
-  afterimages, "CLOSE CALL" near a zombie extends the combo), `G.trauma`
+- **Feel / score** — smoothed player velocity, dash (`DASH_MAX` charges
+  refilling every `DASH_CD`, a 4.8×→1.4× burst over `DASH_T`, buffered,
+  i-frames, afterimages, "CLOSE CALL" near a zombie extends the combo), `G.trauma`
   shake, `hitStop`, `slowMo`, WASTED. Kills feed `addKillScore`: combo
   (3s window, a hit breaks it), multiplier `1 + combo/6` (max ×10), FRENZY
-  banners; `META.best` keeps the best score. Mouse held = manual aim (snaps
-  to a zombie within 18px), else auto-aim
+  in the feed; `META.best` keeps the best score. Desktop: the cursor always
+  aims, the left button fires (no auto-aim). Touch: auto-aim at the nearest
+  zombie
 - **Text** — pixel font `font_atlas` (5×8). `ftext` is a drop-in for
   `fillText` (reads `ctx.font`/`fillStyle`/`textAlign`); `ftx(str,x,y,size,
   col,align,italic)` takes explicit style and leaves ctx untouched;
   `fmeasure(str, size?)`. Strings are baked once per colour atlas
   (`textBitmap`, LRU) — one drawImage per string. Never use `ctx.fillText`
 - **HUD** (`renderHUD`) — weapon/ammo panel, segmented HP with lag, `$`
-  score counter, multiplier, threat stars, pager (`G.pager`, LCD typewriter),
-  `banner()` headlines (newest replaces older), King arrow, radar
+  score counter, multiplier, threat stars, pager (`G.pager`, LCD typewriter,
+  bottom centre), `banner()` headlines in a band under the wave counter
+  (newest replaces older; only WASTED takes the centre), `feed()` small
+  lines under the pause button (multiplier, frenzy, level up, close call),
+  King arrow, radar. Keep the middle of the screen clear
 - **UN unlocks / META gold** — localStorage `orcslasher_unlocks` +
   `orcslasher_meta`; demo/heavy via 0.1% boss relic roll in `killEnemy`,
   ghost on reaching wave 10, commando (secret) on clearing wave 20, or buy
@@ -148,23 +156,23 @@ src/game.js` before building.
   during play. `im.atl` = slot. Draw sprites with `dimg(g, im, x, y, w?, h?)`
   (or `dimgTop` for a cropped top), never `drawImage(IMG[..])` — plain
   canvases fall through to drawImage
-- **Input**: keyboard (`handleKey`), mouse (hold = aim, `mouse`), touch
-  (`touch`: hold = run toward finger, tap = walk-to / `focusAt` lock-on,
-  flick or 2nd finger = `touchDash`; no on-screen sticks). Hero routes via
-  `planPath` (A* in an 81×81-tile window, 3000-node budget, string-pulled
-  with `clearRun`; `heroWalk` = `walkAt` minus tiles holding any prop rect)
-  into `PATH`; re-plans when the target changes tile or progress stalls. `focus` is
-  honoured by auto-aim via `focusTarget`. `usingTouch` switches hint
-  texts and tap padding (`tapPad`); `buzz(ms)` = haptics. Portrait on a
-  phone shows the `#rotate` card (index.html CSS) and pauses
-- **Intro / hints**: `startIntro(1)` on `newRun` = King shot → whip-pan
-  (`introCam` overrides the camera) → hero drop (`player.dropZ`,
-  `heroLands`); `introLocked()` freezes the world and hides the HUD; any
-  input → `skipIntro()`; shorter once all hints are learned. `startIntro(2)`
-  on waves 2+ = 0.55s whip from a spawn point, no lock. `renderLetterbox`.
-  Hints: one label-free pixel prompt (keys / mouse / ghost hand) at a time;
-  `learn(LEARN_MOVE|AIM|DASH)` pops it and saves per input type in
-  localStorage `orcslasher_learned`. Bench/profile call `skipIntro()`
+- **Input**: keyboard (`handleKey`; dash fires on the keydown itself), mouse
+  (`mouse`: always aims, left = fire, right = dash), touch: a floating run
+  `stick` in the lower right (`inStickZone`, `stickHome`, `STICK_R`, output
+  `stick.vx/vy`), any other touch = `dashNow()`. `blur` releases everything.
+  `usingTouch` switches aim mode, hint texts and tap padding (`tapPad`);
+  `buzz(ms)` = haptics. Portrait on a phone shows the `#rotate` card
+  (index.html CSS) and pauses
+- **Camera** (`camera`): locked to the hero plus a lead (cursor offset on
+  desktop, aim/heading on touch); only the lead eases and both are whole
+  pixels, so a running hero never jitters against the street
+- **Intro / hints**: `startIntro()` on `newRun` = 0.35s hero drop
+  (`player.dropZ`, `heroLands`); `introLocked()` holds the world and HUD
+  for it; any input → `skipIntro()`. Hints: one plain line at the bottom
+  (`HINTS_DESK` / `HINTS_TOUCH`); `learn(LEARN_MOVE|AIM|DASH)` greens a part
+  and saves per input type in localStorage `orcslasher_learned`; the line
+  goes when all are learned or after 10s. Bench/profile call `skipIntro()`
+  and set `usingTouch` so the scene keeps shooting
 - **Rendering**: the game draws VW×270 into two layers — `sceneCtx`
   (world) and `uiCtx` (HUD, damage numbers, overlays; never lit). `ctx`
   points at the current one; `frame()` switches it. Feet-anchored
@@ -196,8 +204,8 @@ src/game.js` before building.
 Playwright smoke tests against the dist build (Chromium is preinstalled):
 
 ```
-node tools/mobile_test.mjs [--shots dir]   # phone: taps, hold/tap/flick/2-finger,
-                                           # focus fire, wide view, portrait card
+node tools/mobile_test.mjs [--shots dir]   # phone: menus by tap, run stick, tap /
+                                           # 2nd-finger dash, auto-aim, portrait card
 node -e "..."  # ad-hoc: launch chromium with
                # executablePath /opt/pw-browsers/chromium, --no-sandbox,
                # goto file://.../dist/orc-slasher.html, drive via
