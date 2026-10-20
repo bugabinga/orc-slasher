@@ -31,7 +31,7 @@ for (const [name, sc] of Object.entries(SCENES)) {
   await page.waitForFunction(() => typeof assetsLeft !== "undefined" && assetsLeft === 0);
   await page.keyboard.press("Enter");
   await page.evaluate(`(${sc.setup})()`);
-  await page.evaluate(() => { if (typeof skipIntro === "function") skipIntro(); }); // measure play, not the cinematic
+  await page.evaluate(() => { if (typeof skipIntro === "function") skipIntro(); usingTouch = true; }); // measure play, not the drop-in; touch = the gun aims itself, so the scene keeps shooting
   await page.evaluate(() => { player.stats.maxHp = 1e9; player.hp = 1e9; });
   await page.waitForTimeout(1000);
   await cdp.send("Profiler.enable");
