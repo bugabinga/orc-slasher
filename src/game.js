@@ -333,9 +333,22 @@ function goFullscreenLandscape() { // phones: first tap goes fullscreen + landsc
       .catch(() => {});
   }
 }
-// dash where you're heading; standing still: where you aim
+// what the keys / stick ask for right now, length <= 1 (written to MOVE_V)
+const MOVE_V = { x: 0, y: 0 };
+function moveInput() {
+  let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  let my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
+  if (stick.id !== -1) { mx = stick.vx; my = stick.vy; }
+  const ml = Math.hypot(mx, my);
+  if (ml > 1) { mx /= ml; my /= ml; }
+  MOVE_V.x = mx; MOVE_V.y = my;
+  return MOVE_V;
+}
+// dash where you're heading (read live: the key may have gone down this
+// very frame); standing still: where you aim
 function dashNow() {
-  let dx = player.moveX, dy = player.moveY;
+  const mv = moveInput();
+  let dx = mv.x, dy = mv.y;
   if (Math.hypot(dx, dy) < 0.1) { dx = Math.cos(player.atkAng); dy = Math.sin(player.atkAng); }
   if (Math.hypot(dx, dy) < 0.1) { dx = player.facing; dy = 0; }
   const l = Math.hypot(dx, dy);
@@ -1235,7 +1248,7 @@ function newRun(weaponId) {
     facing: 1, moving: false, animT: 0,
     atkCd: 0, atkAng: 0, hurtCd: 0, dashN: DASH_MAX, dashCd: 0, dashT: 0, dashX: 0, dashY: 0,
     flash: 0, ammo: 0, reloadT: 0, recoil: 0, lastShot: -9, akimboSide: 1,
-    vx: 0, vy: 0, moveX: 0, moveY: 0, hpLag: stats.maxHp, dashBuf: 0, ghostT: 0, dropZ: 0,
+    vx: 0, vy: 0, hpLag: stats.maxHp, dashBuf: 0, ghostT: 0, dropZ: 0,
     runList: ANIM[CLASSES[G.cls].anim + "_run"], idleList: ANIM[CLASSES[G.cls].anim + "_idle"],
   };
   player.ammo = clipSize();
@@ -2351,13 +2364,8 @@ function sysTexts(dt) {
 const DASH_MAX = 2, DASH_CD = 1.1, DASH_T = 0.18; // two charges; each comes back after DASH_CD
 function updatePlayer(dt) {
   const st = player.stats;
-  let mx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
-  let my = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
-  if (stick.id !== -1) { mx = stick.vx; my = stick.vy; }
-  const ml = Math.hypot(mx, my);
-  if (ml > 1) { mx /= ml; my /= ml; }
+  const mv = moveInput(), mx = mv.x, my = mv.y, ml = Math.hypot(mx, my);
   player.moving = ml > 0.1;
-  player.moveX = mx; player.moveY = my;
   if (!usingTouch && mouse.seen) { // the hero always faces the cursor
     const h = handPos();
     player.atkAng = Math.atan2(mouse.y + G.cam.y - h.y, mouse.x + G.cam.x - h.x);
