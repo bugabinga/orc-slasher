@@ -342,8 +342,8 @@ function dashNow() {
   tryDash(dx / l, dy / l);
 }
 canvas.addEventListener("pointerdown", e => {
-  if (e.pointerType === "touch") { usingTouch = true; goFullscreenLandscape(); }
-  else if (e.pointerType === "mouse") usingTouch = false;
+  if (e.pointerType !== "mouse") { usingTouch = true; goFullscreenLandscape(); } // a pen plays like a finger
+  else usingTouch = false;
   if (G.state === "play" && skipIntro()) return;
   const p = canvasPos(e);
   if (passModal.open || (["title", "cls", "select"].includes(G.state) && keyBtnRect &&
@@ -1246,7 +1246,7 @@ function newRun(weaponId) {
   say("The dead dragged the King into this city…", 1.2);
   say("I will find him. Locked and loaded.", 4.2);
   startWave(1);
-  hint.t = 0; hint.moveT = 0; hint.doneT = 0; hint.start = learned[usingTouch ? "touch" : "desk"] & LEARN_ALL;
+  hint.t = 0; hint.moveT = 0; hint.doneT = 0; hint.start.desk = learned.desk & LEARN_ALL; hint.start.touch = learned.touch & LEARN_ALL;
   startIntro();
   G.state = "play";
 }
@@ -3429,7 +3429,7 @@ function skipIntro() {
 const LEARN_MOVE = 1, LEARN_AIM = 2, LEARN_DASH = 4, LEARN_ALL = 7;
 const learned = { desk: 0, touch: 0 };
 try { Object.assign(learned, JSON.parse(localStorage.getItem("orcslasher_learned") || "{}")); } catch (e) { /* no storage */ }
-const hint = { t: 0, moveT: 0, doneT: 0, start: 0 };
+const hint = { t: 0, moveT: 0, doneT: 0, start: { desk: 0, touch: 0 } }; // start: learned when the run began
 function learn(bit) {
   const k = usingTouch ? "touch" : "desk";
   if (learned[k] & bit) return;
@@ -3446,7 +3446,7 @@ function updateHints(dt) {
 const HINTS_DESK = [[LEARN_MOVE, "WASD MOVE"], [LEARN_AIM, "MOUSE AIM + CLICK SHOOT"], [LEARN_DASH, "SPACE DASH"]];
 const HINTS_TOUCH = [[LEARN_MOVE, "STICK RUN"], [LEARN_DASH, "TAP DASH"]];
 function renderHints() {
-  if (G.paused || G.wasted || hint.start === LEARN_ALL) return;
+  if (G.paused || G.wasted || hint.start[usingTouch ? "touch" : "desk"] === LEARN_ALL) return;
   const a = Math.min(1, hint.t * 4) * Math.max(0, Math.min(1, 10 - hint.t, 1 - (hint.doneT - 0.8) * 3));
   if (a <= 0) return;
   const set = learned[usingTouch ? "touch" : "desk"], items = usingTouch ? HINTS_TOUCH : HINTS_DESK;
