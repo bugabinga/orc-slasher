@@ -2689,8 +2689,7 @@ function newRun(weaponId) {
   say("The dead dragged the King into this city…", 1.2);
   say("I will find him. Locked and loaded.", 4.2);
   startWave(1);
-  hint.moveT = 0;
-  for (const k of ["desk", "touch"]) { const h = hint[k]; h.t = h.doneT = 0; h.start = learned[k] & LEARN_ALL; }
+  for (const k of ["desk", "touch"]) { const h = hint[k]; h.t = h.moveT = h.doneT = 0; h.start = learned[k] & LEARN_ALL; }
   startIntro();
   G.state = "play";
 }
@@ -4869,8 +4868,9 @@ const LEARN_MOVE = 1, LEARN_AIM = 2, LEARN_DASH = 4, LEARN_ALL = 7;
 const learned = { desk: 0, touch: 0 };
 try { Object.assign(learned, JSON.parse(localStorage.getItem("orcslasher_learned") || "{}")); } catch (e) { /* no storage */ }
 // one record per input mode (a hybrid device can switch mid-run): seconds
-// shown, seconds since all were learned, what was learned when the run began
-const hint = { moveT: 0, desk: { t: 0, doneT: 0, start: 0 }, touch: { t: 0, doneT: 0, start: 0 } };
+// shown, seconds moved, seconds since all were learned, what was learned
+// when the run began
+const hint = { desk: { t: 0, moveT: 0, doneT: 0, start: 0 }, touch: { t: 0, moveT: 0, doneT: 0, start: 0 } };
 function learn(bit) {
   const k = usingTouch ? "touch" : "desk";
   if (learned[k] & bit) return;
@@ -4879,9 +4879,9 @@ function learn(bit) {
 }
 function updateHints(dt) {
   if (G.state !== "play" || introLocked() || G.paused || G.wasted) return;
-  if (player.moving && player.dashT <= 0 && (hint.moveT += dt) > 0.35) learn(LEARN_MOVE);
-  if (usingTouch) learn(LEARN_AIM); // the gun aims itself
   const mode = usingTouch ? "touch" : "desk", h = hint[mode];
+  if (player.moving && player.dashT <= 0 && (h.moveT += dt) > 0.35) learn(LEARN_MOVE);
+  if (usingTouch) learn(LEARN_AIM); // the gun aims itself
   h.t += dt;
   if ((learned[mode] & LEARN_ALL) === LEARN_ALL) h.doneT += dt;
 }
